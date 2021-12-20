@@ -1,0 +1,44 @@
+/**
+ * Macro: M21051 Save Tool Table
+ * UCCNC v1.2115 or higher required, with Messages plugin enabled
+ * 
+ * Save tool table from Screenset (NEON) to profile
+ * Screenset Button "SAVE TOOLTABLE"
+ */
+
+var result = Prompt("Save Tool Table", "", "YesNo");
+if(result != DialogResult.Yes){
+    return;
+}
+
+// UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
+// we are resorting to using a custom section for tool slot in the profile to prevent losing data
+var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
+
+var fieldStartIdxToolSlot = 20800;
+var fieldStartIdxToolZ_1 = 195; // 196-215 - T1-20
+var fieldStartIdxToolZ_2 = 900; // 921-996 - T21-96
+var fieldStartIdxToolDia = 2500; // 2501-2596
+var fieldStartIdxToolDesc = 20700;
+
+for(var i=1; i<=96; i++){
+	var fieldStartIdxToolZ = i < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
+
+	var slot = int.Parse(AS3.Getfield(fieldStartIdxToolSlot+i));
+	var len = double.Parse(AS3.Getfield(fieldStartIdxToolZ+i));
+	var dia = double.Parse(AS3.Getfield(fieldStartIdxToolDia+i));
+	var desc = AS3.Getfield(fieldStartIdxToolDesc+i);
+
+	exec.Writekey(profileToolTableSlotSection, "Slot"+i, slot.ToString());
+	exec.Writekey("Tooltablevalues", "TooloffsetZ"+i, len.ToString());
+	exec.Writekey("Tooltablevalues", "ToolDia"+i, dia.ToString());
+	exec.Writekey("Tooltablevalues", "Description"+i, desc);
+}
+
+#Events
+// ### GLOBAL UTILS ###
+
+private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
+    var result = exec.Informplugin("Messages.dll", string.Format("{0}{1}:{2}|{3}", warning ? "!" : "", button, title, messsage));
+    return result is DialogResult ? (DialogResult)result : DialogResult.None;
+}

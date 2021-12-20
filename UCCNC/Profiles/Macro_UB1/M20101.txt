@@ -1,0 +1,124 @@
+/**
+ * Macro: M20101 REMOVE Tn G49
+ * UCCNC v1.2115 or higher required, with Messages plugin enabled
+ * 
+ * Unload current tool from spindle and unassign tool slot
+ * Screenset Button "REMOVE Tn G49"
+ */
+
+// ### CONFIG ###
+
+// UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
+// we are resorting to using a custom section for tool slot in the profile to prevent losing data
+var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
+
+var toolManualPosition = new Position(-9.0D, -18.0D);
+var atcOutputToolRelease = new PortPin(3, 1); // OUTPUT to engage drawbar release
+var atcOutputPurge = new PortPin(3, 3); // OUTPUT to engage air purge
+var atcLEDToolClamp = 96; // OutputPT3PN11 // INPUT to detect if a tool is clamped
+var atcLEDToolRelease = 97; // OutputPT3PN12 // INPUT to detect drawbar release
+
+int delayPurge = 500;
+int delayClamp = 500;
+
+var buttonInterrupt = 130; // Interrupt from failure: 130=Cycle Stop or 512=RESET
+var buttonCancel = 130; // Cancel from user: 130=Cycle Stop or 512=RESET
+
+// ### MACRO ###
+
+if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58)) // If machine was not homed then it is unsafe to move in machine coordinates, stop here...
+{
+    exec.Stop();
+    Prompt("REMOVE Tn G49: Failed", "Machine is not homed", "OK", true);
+    return;
+}
+
+int toolNumber = exec.Getcurrenttool();
+var toolDesc = exec.Readkey("Tooltablevalues", "Description"+toolNumber, "");
+
+var result = Prompt("REMOVE Tn G49", "Move to tool unload position for manually unload T" + toolNumber + "?\n" + toolDesc, "YesNoCancel", true);
+if(result == DialogResult.Yes){
+    exec.Code("G00 G53 X" + toolManualPosition.X + " Y" + toolManualPosition.Y);
+    while(exec.IsMoving()){}
+}else if(result != DialogResult.No){
+    exec.AddStatusmessage("Tool removal was canceled");
+    exec.Callbutton(buttonCancel);
+    return;
+}
+
+result = Prompt("REMOVE Tn G49", "Unload T" + toolNumber + " and press OK\n" + toolDesc, "OKCancel");
+if(result != DialogResult.OK){
+    exec.AddStatusmessage("Tool removal was canceled");
+    exec.Callbutton(buttonCancel);
+    return;
+}
+
+// nothing should be in spindle at this point
+if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, false)){
+    exec.Callbutton(buttonInterrupt);
+    Prompt("REMOVE Tn G49: Failed", "Spindle not empty", "OK", true);
+    return;
+}
+
+if(!exec.Ismacrostopped()) {
+    exec.Writekey(profileToolTableSlotSection, "Slot" + toolNumber, "0");
+
+    exec.Setcurrenttool(0);
+    AS3.Setfield(0, 2652); // Field: Changetool
+    AS3.Validatefield(2652);
+
+    exec.Code("G49");
+    while(exec.IsMoving()){}
+}else{
+    exec.AddStatusmessage("M20101 interrupted");
+    return;
+}
+
+
+#Events
+// ### GLOBAL UTILS ###
+
+private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
+    var result = exec.Informplugin("Messages.dll", string.Format("{0}{1}:{2}|{3}", warning ? "!" : "", button, title, messsage));
+    return result is DialogResult ? (DialogResult)result : DialogResult.None;
+}
+
+private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLed, bool releaseExpected) {
+    var retry = 4;
+    var debounce = 2;
+    var result = false;
+
+    do{
+        // dwell after first
+        if(debounce < 2 || retry < 4){ exec.Wait(250); }
+
+        var clampState = exec.GetLED(clampLed);
+        var releaseState = exec.GetLED(releaseLed);
+
+        result = clampState == clampExpected && releaseState == releaseExpected;
+        debounce = result ? debounce - 1 : 2;
+        retry = result ? retry : retry - 1;
+    }while(retry > 0 && debounce > 0 && !result);
+
+    return result;
+}
+
+private struct Position {
+    public Position(double x, double y) {
+        this.X = x;
+        this.Y = y;
+    }
+
+    public double X;
+    public double Y;
+}
+
+private struct PortPin {
+    public PortPin(int port, int pin) {
+        this.Port = port;
+        this.Pin = pin;
+    }
+
+    public int Port;
+    public int Pin;
+}

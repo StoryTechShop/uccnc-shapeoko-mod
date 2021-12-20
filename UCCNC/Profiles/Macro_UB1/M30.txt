@@ -1,0 +1,16 @@
+/**
+ * Macro: M30 Program End
+ * Executed for program end, file rewind and reset
+ * Move back to Z0, X0Y0 machine position
+ */
+
+// ### M30 MACRO ### 
+
+while (exec.IsMoving()) { }
+
+exec.Code("M9");
+exec.Code("M5");
+exec.Code("G53 G0 Z0.0");
+exec.Code("G53 G0 X0.0 Y0.0");
+
+while(exec.IsMoving()){}

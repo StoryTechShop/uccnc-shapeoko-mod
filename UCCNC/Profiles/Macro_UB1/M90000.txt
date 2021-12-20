@@ -1,0 +1,36 @@
+// Monitor M3, M4, M7 and M8 to turn on/off ATC Seal
+
+DateTime ATCSealOnSince = DateTime.UtcNow;
+int ATCSeal_Port = 3; // OutputPT3PN4;
+int ATCSeal_Pin = 4; // OutputPT3PN4;
+
+int[] LEDs = new int[]{
+	50, // SpindleCW M3
+	51, // SpindleCCW M4
+	52, // Miston M7
+	53, // Floodon M8
+	86, // OutputPT3PN1 ATC Release
+	88, // OutputPT3PN3 ATC Purge
+};
+
+while(loop) {
+
+	if(
+		Array.FindIndex(LEDs, l => exec.GetLED(l)) > -1
+		|| !exec.GetLED(95) // OutputPT3PN10 VFD Running
+	){
+		exec.Setoutpin(ATCSeal_Port, ATCSeal_Pin);
+		ATCSealOnSince = DateTime.UtcNow;
+	}else{
+		// Delay turning off ATC Seal by 3 seconds
+		TimeSpan elapsed = DateTime.UtcNow - ATCSealOnSince;
+		if(elapsed.TotalSeconds > 3.0){
+			exec.Clroutpin(ATCSeal_Port, ATCSeal_Pin);
+		}
+	}
+
+	Thread.Sleep(50);
+}
+
+// Turn off ATC Seal on stop
+exec.Clroutpin(ATCSeal_Port, ATCSeal_Pin);

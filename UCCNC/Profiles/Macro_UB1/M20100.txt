@@ -1,0 +1,19 @@
+/**
+ * Macro: M20100 SET Tn G43
+ * Set tool number and offset to value in changetool field
+ * Screenset Button "SET Tn G43"
+ */
+
+if(!exec.Ismacrostopped()) {
+	int toolNumber = int.Parse(AS3.Getfield(2652)); // Field: Changetool
+	exec.Setcurrenttool(toolNumber);
+	if(toolNumber > 0) {
+		exec.Code("G43 H" + toolNumber);
+	} else {
+		exec.Code("G49");
+	}
+	while(exec.IsMoving()){}
+}else{
+    exec.AddStatusmessage("M20100 interrupted");
+    return;
+}

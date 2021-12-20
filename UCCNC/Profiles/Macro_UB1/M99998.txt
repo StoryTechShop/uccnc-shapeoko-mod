@@ -1,0 +1,28 @@
+//This is the Constructor macro which executes once when the application gets loaded
+
+var fieldStartIdxToolSlot = 20800;
+var fieldStartIdxToolZ_1 = 195; // 196-215 - T1-20
+var fieldStartIdxToolZ_2 = 900; // 921-996 - T21-96
+var fieldStartIdxToolDia = 2500; // 2501-2596
+var fieldStartIdxToolDesc = 20700;
+
+for(var i=1; i<=96; i++){
+	var slot = int.Parse(exec.Readkey("Tooltablevalues", "Slot"+i, "0"));
+	var len = double.Parse(exec.Readkey("Tooltablevalues", "TooloffsetZ"+i, "0.0"));
+	var dia = double.Parse(exec.Readkey("Tooltablevalues", "ToolDia"+i, "0.0"));
+	var desc = exec.Readkey("Tooltablevalues", "Description"+i, "");
+	var type = exec.Readkey("Tooltablevalues", "Type"+i, "");
+
+	AS3.Setfieldtext(slot.ToString(), fieldStartIdxToolSlot+i);
+	AS3.Validatefield(fieldStartIdxToolSlot+i);
+
+	var fieldStartIdxToolZ = i < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
+	AS3.Setfieldtext(len.ToString(), fieldStartIdxToolZ+i);
+	AS3.Validatefield(fieldStartIdxToolZ+i);
+
+	AS3.Setfieldtext(dia.ToString(), fieldStartIdxToolDia+i);
+	AS3.Validatefield(fieldStartIdxToolDia+i);
+
+	AS3.Setfieldtext(desc, fieldStartIdxToolDesc+i);
+	AS3.Validatefield(fieldStartIdxToolDesc+i);
+}
