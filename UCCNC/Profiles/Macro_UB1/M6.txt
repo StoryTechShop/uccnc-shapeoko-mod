@@ -43,7 +43,7 @@
 var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
 
 double zSafe = 0.0D; // safe Z position for travel
-double zToolRelease = -5.0150D; // Z position to release tool
+double zToolRelease = -5.0250D; // Z position to release tool
 double zToolClamp = zToolRelease; // Z position to clamp tool
 double zRetract = 0.5D; // distance above tool release/clamp position to feed and toggle air purge
 int zRetractFeed = 20; // feedrate when moving to or out of tool release/clamp position
@@ -97,16 +97,21 @@ if(toolCurrentNumber == toolNewNumber){
 
 // store original position to move back to
 var originalPosition = new Position(exec.GetXmachpos(), exec.GetYmachpos());
+var originalModal = new List<string>(AS3.Getfield(877).Split('|'));
 
-// stop spindle and move Z axis up
-exec.Code("S0 M5 G00 G53 Z" + zSafe);
+// stop spindle
+exec.Code("S0 M5");
+while(exec.IsMoving()){}
+
+// move to safe z
+exec.Code("G90 G00 G53 Z" + zSafe);
 while(exec.IsMoving()){}
 
 // read the tool slot #
 var toolCurrentSlot = toolCurrentNumber > 0 ? int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+toolCurrentNumber, "0")) : 0;
 var toolNewSlot = toolNewNumber > 0 ? int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+toolNewNumber, "0")) : 0;
 
-var toolCurrentDesc = exec.Readkey("Tooltablevalues", "Description"+toolNewNumber, "");
+var toolCurrentDesc = exec.Readkey("Tooltablevalues", "Description"+toolCurrentNumber, "");
 var toolNewDesc = exec.Readkey("Tooltablevalues", "Description"+toolNewNumber, "");
 
 // check that tool slot not out of range
@@ -127,7 +132,7 @@ var toolCurrentStorable = !Array.Exists(toolCurrentTypeFlags, f => string.Equals
 
 if(toolCurrentNumber > 0){
     if(!toolCurrentStorable){
-        var result = Prompt("M6: Tool Not Storable", "Move to tool unload position for manually unload T" + toolNewNumber + "?\n" + toolCurrentDesc, "YesNoCancel", true);
+        var result = Prompt("M6: Tool Not Storable", "Move to tool unload position for manually unload T" + toolCurrentNumber + "?\n" + toolCurrentDesc, "YesNoCancel", true);
         if(result == DialogResult.Yes){
             exec.Code("G00 G53 X" + toolManualPosition.X + " Y" + toolManualPosition.Y);
             while(exec.IsMoving()){}
@@ -358,8 +363,16 @@ if(!exec.Ismacrostopped()) {
     }
     while(exec.IsMoving()){}
 
+    // move to safe z
+    exec.Code("G00 G53 Z" + zSafe);
+    while(exec.IsMoving()){}
+
+    // move back to original position
     exec.Code("G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y);
     while(exec.IsMoving()){}
+
+    // restore modal (expect tool offset which was applied above)
+    exec.Codelist(originalModal.FindAll(m => !m.StartsWith("G43") && m != "G49"));
 }else{
     ATCClose(atcOutputToolRelease, atcOutputPurge);
     exec.AddStatusmessage("M6 interrupted");

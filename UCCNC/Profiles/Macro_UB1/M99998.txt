@@ -1,5 +1,9 @@
 //This is the Constructor macro which executes once when the application gets loaded
 
+// UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
+// we are resorting to using a custom section for tool slot in the profile to prevent losing data
+var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
+
 var fieldStartIdxToolSlot = 20800;
 var fieldStartIdxToolZ_1 = 195; // 196-215 - T1-20
 var fieldStartIdxToolZ_2 = 900; // 921-996 - T21-96
@@ -7,7 +11,7 @@ var fieldStartIdxToolDia = 2500; // 2501-2596
 var fieldStartIdxToolDesc = 20700;
 
 for(var i=1; i<=96; i++){
-	var slot = int.Parse(exec.Readkey("Tooltablevalues", "Slot"+i, "0"));
+	var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+i, "0"));
 	var len = double.Parse(exec.Readkey("Tooltablevalues", "TooloffsetZ"+i, "0.0"));
 	var dia = double.Parse(exec.Readkey("Tooltablevalues", "ToolDia"+i, "0.0"));
 	var desc = exec.Readkey("Tooltablevalues", "Description"+i, "");
