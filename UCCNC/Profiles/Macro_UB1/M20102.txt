@@ -1,0 +1,43 @@
+/**
+ * Macro: M20102 Tool Offset Measure All in ATC
+ * Measure each tool in ATC slots
+ * Screenset Button "ATC ALL M31"
+ */
+
+// UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
+// we are resorting to using a custom section for tool slot in the profile to prevent losing data
+var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
+
+var slotToolNumbers = new int[9];
+
+// go through tool table finding tools with an assigned slot number
+for(var i=1; i<=96; i++){
+	var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+i, "0"));
+	if(slot > 0 && slot < slotToolNumbers.Length){
+		slotToolNumbers[slot] = i;
+	}
+}
+
+foreach(var toolNumber in slotToolNumbers){
+	if(toolNumber < 1){ continue; }
+
+	exec.AddStatusmessage("Measuring tool offset for T" + toolNumber);
+
+	if(!exec.Ismacrostopped()) {
+		exec.Code("T" + toolNumber + " M6");
+		while(exec.Ismacrorunning(6) > 0){}
+		while(exec.IsMoving()){}
+	}else{
+		exec.AddStatusmessage("M20102 interrupted");
+		return;
+	}
+
+	if(!exec.Ismacrostopped()) {
+		exec.Code("M31");
+		while(exec.Ismacrorunning(31) > 0){}
+		while(exec.IsMoving()){}
+	}else{
+		exec.AddStatusmessage("M20102 interrupted");
+		return;
+	}	
+}

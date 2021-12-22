@@ -1,0 +1,268 @@
+/**
+ * Macro: M31 Tool Offset Measure /w breakage detection
+ * UCCNC v1.2115 or higher required with Messages, Probe plugins enabled and fixed probe location set.
+ * M31 [Hn] [En.n]
+ * - H: Tool offset number (optional, defaults to active G43Hn or current tool)
+ * - E: Tool breakage tolerance value (optional, defaults to no tolerance)
+ */
+
+// ### M31 CONFIG ###
+
+var atcLEDToolClamp = 96; // INPUT to detect if a tool is clamped (InputPT3PN11)
+var atcLEDToolRelease = 97; // INPUT to detect drawbar release (InputPT3PN12)
+
+var buttonInterrupt = 130; // Interrupt from failure: 130=Cycle Stop or 512=RESET
+var buttonCancel = 130; // Cancel from user: 130=Cycle Stop or 512=RESET
+
+double zSafe = 0.0D; // safe Z position for travel
+var probeZ = -5.0D; // Max Z machine position to probe to
+
+var probeRetract = double.Parse(AS3.Getfield(2707)); // Retract
+var probeFastFeed = double.Parse(AS3.Getfield(2709)); // FastFeed
+var probeFineFeed = double.Parse(AS3.Getfield(2710)); // FineFeed
+
+var probePosition = new Position(double.Parse(AS3.Getfield(2726)), double.Parse(AS3.Getfield(2727))); // FixedProbePosX, FixedProbePosY
+var probePositionZ = double.Parse(AS3.Getfield(2728)); // FixedProbePosZ
+
+var fieldStartIdxToolZ_1 = 195; // 196-215 - T1-20
+var fieldStartIdxToolZ_2 = 900; // 921-996 - T21-96
+
+// ### M31 MACRO ###
+
+// get the current tool
+var toolCurrentNumber = exec.Getcurrenttool();
+
+// get the current G43 offset from active modal
+var modalG43 = System.Text.RegularExpressions.Regex.Match(AS3.Getfield(877), "G43H(\\d+)");
+int? offsetCurrentNumber = modalG43.Success ? (int?)int.Parse(modalG43.Groups[1].Value) : null;
+
+// get the offset tool number
+int offsetToolNumber = (Allvars != null ? (Allvars.Hvar != null ? (int?)Allvars.Hvar : null) : null) ?? offsetCurrentNumber ?? toolCurrentNumber;
+var fieldStartIdxToolZ = offsetToolNumber < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
+
+// get values needed for breakage detection
+var toolBreakageTolerance = (Allvars != null ? Allvars.Evar : null);
+var offsetCurrentZ = offsetToolNumber > 0 ? double.Parse(AS3.Getfield(fieldStartIdxToolZ+offsetToolNumber)) : 0.0D;
+
+// exec.AddStatusmessage("M31 H" + offsetToolNumber.ToString() + (toolBreakageTolerance != null ? " E" + toolBreakageTolerance : "") + " (Current Offset: " + offsetCurrentZ + ")");
+
+if(toolBreakageTolerance != null && toolBreakageTolerance < 0.0D){
+    exec.Callbutton(buttonInterrupt);
+    exec.AddStatusmessage("M31 E" + toolBreakageTolerance + " tool tolerance must be absolute value");
+    return;
+}
+
+if(offsetToolNumber < 1 || offsetToolNumber > 96){
+    exec.Callbutton(buttonInterrupt);
+    exec.AddStatusmessage("M31 H" + offsetToolNumber + " tool offset number out of range");
+    return;
+}
+
+ // If machine was not homed then it is unsafe to move in machine coordinates, stop here...
+if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
+{
+    exec.Callbutton(buttonInterrupt);
+    Prompt("M31: Tool Offset Probe", "Machine is not homed", "OK", true);
+    return;
+}
+
+// check that there is a tool in spindle
+if(toolCurrentNumber < 1 || !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
+    exec.Callbutton(buttonInterrupt);
+    Prompt("M31: Tool Offset Probe", "Tool not in spindle", "OK", true);
+    return;
+}
+
+var toolMasterNumber = 0;
+// find master tool number
+for(var i=1; i <= 96; i++){
+     var toolTypeFlags = exec.Readkey("Tooltablevalues", "Type" + i, "").Split(new char[]{' ', ',', ';'});
+     if(Array.Exists(toolTypeFlags, f => string.Equals(f, "Master", StringComparison.InvariantCultureIgnoreCase))){
+      toolMasterNumber = i;
+      break;
+     }
+}
+if(toolMasterNumber < 0){
+    exec.Callbutton(buttonInterrupt);
+    Prompt("M31: Tool Offset Probe", "No master tool refernce found", "OK", true);
+    return;
+}
+
+// get master tool description
+var toolMasterDesc = exec.Readkey("Tooltablevalues", "Description" + toolMasterNumber, "");
+
+// get the Z machine position of the master tool, fail if one isn't set
+var toolMasterProbeZ = double.Parse(exec.Readkey("M31Macro", "MasterToolProbeZ", "NaN"));
+if(double.NaN.Equals(toolMasterProbeZ)){
+    if(offsetToolNumber != toolMasterNumber){
+        exec.Callbutton(buttonInterrupt);
+        Prompt("M31: Tool Offset Probe", "T" + toolMasterNumber + " master tool reference not probed", "OK", true);
+        return;
+    }
+    toolMasterProbeZ = 0.0D;
+}
+
+// if the tool offset is master, warn of updating master
+if(offsetToolNumber == toolMasterNumber){
+    var result = Prompt("M31: Tool Offset Probe", "Probing T" + toolMasterNumber + " master tool reference may skew current known tool offsets\nContinue probing master tool reference?\n" + toolMasterDesc, "OKCancel", true);
+
+    if(result != DialogResult.OK){
+        exec.AddStatusmessage("Tool offset probe was canceled");
+        exec.Callbutton(buttonCancel);
+        return;
+    }
+}
+
+// store original position to move back to
+var originalPosition = new Position(exec.GetXmachpos(), exec.GetYmachpos());
+var originalModal = new List<string>(AS3.Getfield(877).Split('|'));
+
+// stop spindle
+exec.Code("S0 M5");
+while(exec.IsMoving()){}
+
+// move to safe z
+exec.Code("G90 G53 Z" + zSafe);
+while(exec.IsMoving()){}
+
+// move to fixed probe
+exec.Code("G90 G53 X" + probePosition.X + "Y" + probePosition.Y);
+while(exec.IsMoving()){}
+exec.Code("G90 G53 Z" + probePositionZ);
+while(exec.IsMoving()){}
+
+// cancel out tool offset and scale
+exec.Code("G49 G50");
+while(exec.IsMoving()){}
+
+// two stage probe, fast then fine feed rate
+for(var i=0; i<2; i++){
+    var feedRate = i < 1 ? probeFastFeed : probeFineFeed;
+    var z = i < 1 ? probeZ : -probeRetract;
+
+    // start probing
+    exec.Code("G91 F" + feedRate + " G31 Z" + z);
+    while(exec.IsMoving()){}
+
+    // check probe status outcome
+    var probeStatus = exec.Getvar(5060);
+    if(probeStatus == 1){
+        exec.AddStatusmessage("Failed to probe H" + offsetToolNumber + " tool offset with-in travel");
+        exec.Callbutton(buttonInterrupt);
+        return;
+    }else if(probeStatus != 0){
+        exec.AddStatusmessage("Failed to probe H" + offsetToolNumber + " tool offset (ERR" + probeStatus + ")");
+        exec.Callbutton(buttonInterrupt);
+        return;
+    }
+
+    // retract
+    exec.Code("G91 G0 Z" + probeRetract);
+    while(exec.IsMoving()){}
+}
+
+// Go to safe Z
+exec.Code("G90 G53 Z" + zSafe);
+while(exec.IsMoving()){}
+
+exec.Code("G90");
+while(exec.IsMoving()){}
+
+if(!exec.Ismacrostopped()){
+    // get probe Z result
+    var offsetProbeZ = exec.Getvar(5063);
+    // add current work offset to get probe in machine pos
+    offsetProbeZ += exec.GetZmachpos() - exec.GetZpos();
+
+    // calculate offset Z from master tool (zero out if is master tool)
+    var offsetToolZ = offsetToolNumber != toolMasterNumber ? offsetProbeZ - toolMasterProbeZ : 0.0D;
+
+    if(toolBreakageTolerance != null){
+        // check for tool is with-in tollerance
+        var offsetDifference = Math.Abs(offsetCurrentZ - offsetToolZ);
+        if(offsetDifference > toolBreakageTolerance){
+            exec.AddStatusmessage("Tool offset H" + offsetToolNumber + " measured Z" + offsetToolZ);
+            exec.AddStatusmessage("Tool offset H" + offsetToolNumber + " measurement is out of tolerance: " + offsetDifference + ">" + toolBreakageTolerance);
+            exec.Callbutton(buttonInterrupt);
+            Prompt("M31: Tool Offset Probe", "Tool breakage detected for T" + toolCurrentNumber + " H" + offsetToolNumber, "OK", true);
+            return;
+        }
+    }
+
+    // update tool master
+    if(offsetToolNumber == toolMasterNumber){
+        exec.AddStatusmessage("Setting global master tool reference to Z" + offsetProbeZ);
+        exec.Writekey("M31Macro", "MasterToolProbeZ", offsetProbeZ.ToString());
+    }
+
+    // update tool offset in tool table field
+    exec.AddStatusmessage("Setting H" + offsetToolNumber + " tool offset to Z" + offsetToolZ);
+    AS3.Setfieldtext(offsetToolZ.ToString(), fieldStartIdxToolZ+offsetToolNumber);
+	AS3.Validatefield(fieldStartIdxToolZ+offsetToolNumber);
+
+    // save tool offset in profile
+    exec.Writekey("Tooltablevalues", "TooloffsetZ"+offsetToolNumber, offsetToolZ.ToString());
+
+    // move to safe z
+    exec.Code("G00 G53 Z" + zSafe);
+    while(exec.IsMoving()){}
+
+    // move back to original position
+    // exec.Code("G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y);
+    while(exec.IsMoving()){}
+
+    // restore modal
+    exec.Codelist(originalModal);
+}else{
+    exec.AddStatusmessage("M31 probe tool offset was interrupted");
+    exec.Callbutton(buttonInterrupt);
+    return;
+}
+
+#Events
+// ### GLOBAL UTILS ###
+
+private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
+    var result = exec.Informplugin("Messages.dll", string.Format("{0}{1}:{2}|{3}", warning ? "!" : "", button, title, messsage));
+    return result is DialogResult ? (DialogResult)result : DialogResult.None;
+}
+
+private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLed, bool releaseExpected) {
+    var retry = 4;
+    var debounce = 2;
+    var result = false;
+
+    do{
+        // dwell after first
+        if(debounce < 2 || retry < 4){ exec.Wait(250); }
+
+        var clampState = exec.GetLED(clampLed);
+        var releaseState = exec.GetLED(releaseLed);
+
+        result = clampState == clampExpected && releaseState == releaseExpected;
+        debounce = result ? debounce - 1 : 2;
+        retry = result ? retry : retry - 1;
+    }while(retry > 0 && debounce > 0 && !result);
+
+    return result;
+}
+
+private struct Position {
+    public Position(double x, double y) {
+        this.X = x;
+        this.Y = y;
+    }
+
+    public double X;
+    public double Y;
+}
+
+private struct PortPin {
+    public PortPin(int port, int pin) {
+        this.Port = port;
+        this.Pin = pin;
+    }
+
+    public int Port;
+    public int Pin;
+}
