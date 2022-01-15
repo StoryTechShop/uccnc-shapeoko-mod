@@ -41,7 +41,7 @@
 // UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
 // if auto-assign is enabled, the UCCNC tool table can't be used to manage the tool slot number
 // WARNING: DO NOT CHANGE AFTER A TOOL IS ASSIGNED A SLOT - STORED STATE OF TOOL SLOTS AND TOOL RACK WILL NOT MATCH
-var profileAutoAssignToolSlot = false;
+var profileAutoAssignToolSlot = true;
 // we are resorting to using a custom section for tool slot in the profile to prevent losing data if auto assign is enabled
 var profileToolTableSlotSection = profileAutoAssignToolSlot ? "M6ToolTable" : "Tooltablevalues";
 
