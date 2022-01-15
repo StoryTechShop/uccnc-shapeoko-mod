@@ -82,7 +82,7 @@ for(var i=1; i <= 96; i++){
       break;
      }
 }
-if(toolMasterNumber < 0){
+if(toolMasterNumber < 1){
     exec.Callbutton(buttonInterrupt);
     Prompt("M31: Tool Offset Probe", "No master tool refernce found", "OK", true);
     return;
@@ -198,7 +198,7 @@ if(!exec.Ismacrostopped()){
     // update tool offset in tool table field
     exec.AddStatusmessage("Setting H" + offsetToolNumber + " tool offset to Z" + offsetToolZ);
     AS3.Setfieldtext(offsetToolZ.ToString(), fieldStartIdxToolZ+offsetToolNumber);
-	AS3.Validatefield(fieldStartIdxToolZ+offsetToolNumber);
+    AS3.Validatefield(fieldStartIdxToolZ+offsetToolNumber);
 
     // save tool offset in profile
     exec.Writekey("Tooltablevalues", "TooloffsetZ"+offsetToolNumber, offsetToolZ.ToString());
