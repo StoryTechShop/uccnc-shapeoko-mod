@@ -32,70 +32,102 @@
  * atcLEDToolClamp=false and atcLEDToolRelease=true
  *  drawbar petal unclamped, travel bottoming out at release sensor
  * 
- * NOTE: Tool table slot data is saved in custom profile section due to limitations in UCCNC API
+ * NOTE: Tool table slot data is saved in custom profile section due to limitations in UCCNC API when auto-assign is enabled
  * Custom screenset fields can be used to represent tool table with macro to load and save changes (see M21050 and M21051)
  */
 
 // ### M6 CONFIG ###
 
 // UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
-// we are resorting to using a custom section for tool slot in the profile to prevent losing data
-var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
+// if auto-assign is enabled, the UCCNC tool table can't be used to manage the tool slot number
+// WARNING: DO NOT CHANGE AFTER A TOOL IS ASSIGNED A SLOT - STORED STATE OF TOOL SLOTS AND TOOL RACK WILL NOT MATCH
+var profileAutoAssignToolSlot = false;
+// we are resorting to using a custom section for tool slot in the profile to prevent losing data if auto assign is enabled
+var profileToolTableSlotSection = profileAutoAssignToolSlot ? "M6ToolTable" : "Tooltablevalues";
 
-double zSafe = 0.0D; // safe Z position for travel
-double zToolRelease = -5.0250D; // Z position to release tool
-double zToolClamp = zToolRelease; // Z position to clamp tool
-double zRetract = 0.5D; // distance above tool release/clamp position to feed and toggle air purge
-int zRetractFeed = 20; // feedrate when moving to or out of tool release/clamp position
+// safe Z position for travel
+double zSafe = 0.0D;
 
+// Z position to release tool
+double zToolRelease = -5.0250D;
+// Z position to clamp tool
+double zToolClamp = zToolRelease;
+
+// distance above tool release/clamp position to feed and toggle air purge
+double zRetract = 0.5D;
+// feedrate when moving to or out of tool release/clamp position
+int zRetractFeed = 20; 
+
+// manual tool change position
 var toolManualPosition = new Position(-9.0D, -18.0D); // position for manual tool changes - TODO change to a Park location instead?
+// enable prompts to engage release and clamp
+var toolManualATCPrompts = false;
 
 // tool slot XY positions
 var toolSlots = new Position[]{
-    new Position(double.NaN, double.NaN), // 0 - DOES NOT EXIST
-    new Position(-18.0066D, -0.1277D), // 1
-    new Position(-15.8446D, -0.1306D), // 2
-    new Position(-13.6887D, -0.1300D), // 3
-    new Position(-11.5288D, -0.1379D), // 4
-    new Position(-9.3756D, -0.1328D), // 5
-    new Position(-7.2092D, -0.1208D), // 6
-    new Position(-5.0576D, -0.1175D), // 7
-    new Position(-2.9006D, -0.1346D), // 8
+    // Slot 0 does not exist
+    new Position(double.NaN, double.NaN),
+    // Slot 1
+    new Position(-18.0066D, -0.1277D),
+    // Slot 2
+    new Position(-15.8446D, -0.1306D),
+    // Slot 3
+    new Position(-13.6887D, -0.1300D),
+    // Slot 4
+    new Position(-11.5288D, -0.1379D),
+    // Slot 5
+    new Position(-9.3756D, -0.1328D),
+    // Slot 6
+    new Position(-7.2092D, -0.1208D),
+    // Slot 7
+    new Position(-5.0576D, -0.1175D),
+    // Slot 8
+    new Position(-2.9006D, -0.1346D),
 };
 
-var atcOutputToolRelease = new PortPin(3, 1); // OUTPUT to engage drawbar release
-var atcOutputPurge = new PortPin(3, 3); // OUTPUT to engage air purge
-var atcLEDToolClamp = 96; // INPUT to detect if a tool is clamped (InputPT3PN11)
-var atcLEDToolRelease = 97; // INPUT to detect drawbar release (InputPT3PN12)
+ // OUTPUT to engage drawbar release
+var atcOutputToolRelease = new PortPin(3, 1);
+// OUTPUT to engage drawbar clamp - optional, can be set to null
+PortPin? atcOutputToolClamp = null; // new PortPin(3, 2);
+ // OUTPUT to engage air purge
+var atcOutputPurge = new PortPin(3, 3);
 
-var buttonInterrupt = 130; // Interrupt from failure: 130=Cycle Stop or 512=RESET
-var buttonCancel = 130; // Cancel from user: 130=Cycle Stop or 512=RESET
+// INPUT to detect if a tool is clamped
+var atcLEDToolClamp = 96; // InputPT3PN11
+// INPUT to detect drawbar release
+var atcLEDToolRelease = 97; // InputPT3PN12
+
+// Interrupt from failure: 130=Cycle Stop or 512=RESET
+var buttonInterrupt = 130;
+// Cancel from user: 130=Cycle Stop or 512=RESET
+var buttonCancel = 130;
 
 // ### M6 MACRO ###
 
 var toolCurrentNumber = exec.Getcurrenttool();
 var toolNewNumber = exec.Getnewtool();
 
-if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58)) // If machine was not homed then it is unsafe to move in machine coordinates, stop here...
+// If machine was not homed then it is unsafe to move in machine coordinates, stop here...
+if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
 {
     exec.Callbutton(buttonInterrupt);
     Prompt("M6: Tool Change Failed", "Machine is not homed", "OK", true);
     return;
 }
 
+// Check if there is a tool in the spindle
 if(toolCurrentNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
     exec.Callbutton(buttonInterrupt);
     Prompt("M6: Tool Change Failed", "Tool not in spindle", "OK", true);
     return;
 }
 
-// if same tool
+// if same tool, do nothing
 if(toolCurrentNumber == toolNewNumber){
-    // do nothing
     return;
 }
 
-// store original position to move back to
+// store original XY position and modal to restore
 var originalPosition = new Position(exec.GetXmachpos(), exec.GetYmachpos());
 var originalModal = AS3.Getfield(877).Split('|');
 
@@ -113,6 +145,7 @@ if(!ExecuteGCode(
 var toolCurrentSlot = toolCurrentNumber > 0 ? int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+toolCurrentNumber, "0")) : 0;
 var toolNewSlot = toolNewNumber > 0 ? int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+toolNewNumber, "0")) : 0;
 
+// read the tool desc
 var toolCurrentDesc = exec.Readkey("Tooltablevalues", "Description"+toolCurrentNumber, "");
 var toolNewDesc = exec.Readkey("Tooltablevalues", "Description"+toolNewNumber, "");
 
@@ -128,34 +161,71 @@ if(toolNewSlot >= toolSlots.Length){
     return;
 }
 
+// read and parse tool flags
 var toolCurrentTypeFlags = exec.Readkey("Tooltablevalues", "Type"+toolCurrentNumber, "").Split(new char[]{' ', ',', ';'});
 var toolCurrentStorable = !Array.Exists(toolCurrentTypeFlags, f => string.Equals(f, "Probe", StringComparison.InvariantCultureIgnoreCase) ||
                                                                     string.Equals(f, "NoStore", StringComparison.InvariantCultureIgnoreCase));
+// create function for manual tool changes
+QTCDelegate ExecuteManualToolChange = (string title, ToolChangeAction action, int toolNumber, string toolDesc) => {
+    var result = DialogResult.None;
 
-if(toolCurrentNumber > 0){
-    if(!toolCurrentStorable){
-        var result = Prompt("M6: Tool Not Storable", "Move to tool unload position for manually unload T" + toolCurrentNumber + "?\n" + toolCurrentDesc, "YesNoCancel", true);
+    var distanceX = Math.Abs(exec.GetXmachpos() - toolManualPosition.X);
+    var distanceY = Math.Abs(exec.GetYmachpos() - toolManualPosition.Y);
+    // check if not at manual tool position
+    if(distanceX > 0.0001D || distanceY > 0.0001D){
+        result = Prompt(title, "Move to position for manual " + action.ToString().ToLower() + " of T" + toolNumber + "?\n" + toolDesc, "YesNoCancel", true);
         if(result == DialogResult.Yes){
             if(!ExecuteGCode("G00 G53 X" + toolManualPosition.X + " Y" + toolManualPosition.Y)){
                 exec.AddStatusmessage("M6: tool change interrupted");
-                return;
+                return false;
             }
         }else if(result != DialogResult.No){
-            exec.AddStatusmessage("Can not store T" + toolNewNumber + " in a slot");
+            exec.AddStatusmessage("M6: Manual tool " + action.ToString().ToLower() + " for T" + toolNumber + " was canceled");
             exec.Callbutton(buttonCancel);
-            return;
+            return false;
         }
+    }
 
-        result = Prompt("M6: Manual Tool Change", "Unload T" + toolNewNumber + " and press OK\n" + toolCurrentDesc, "OKCancel");
+    if(!toolManualATCPrompts){
+        result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to continue\n" + toolDesc, "OKCancel");
         if(result != DialogResult.OK){
-            exec.AddStatusmessage("Manual tool change for T" + toolNewNumber + " was canceled");
+            exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
             exec.Callbutton(buttonCancel);
-            return;
+            return false;
         }
+    }else{
+        result = Prompt("M6: Manual Tool Change", (action == ToolChangeAction.Load ?
+            "Press OK to open tool clamp" :
+            "Secure T" + toolNumber + " and press OK to release tool") +
+            "\n" + (action == ToolChangeAction.Load ? "" : toolDesc), "OKCancel"
+        );
+        if(result != DialogResult.OK){
+            exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
+            exec.Callbutton(buttonCancel);
+            return false;
+        }
+        ATCOpen(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
 
-        // move back to safe Z - just in case
-        if(!ExecuteGCode("G00 G53 Z" + zSafe)){
-            exec.AddStatusmessage("M6: tool change interrupted");
+        result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to " + (action == ToolChangeAction.Load ? "clamp tool" : "contuine") + "\n" + toolDesc, "OKCancel");
+        ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
+        if(result != DialogResult.OK){
+            exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
+            exec.Callbutton(buttonCancel);
+            return false;
+        }
+    }
+
+    // move back to safe Z - just in case
+    if(!ExecuteGCode("G00 G53 Z" + zSafe)){
+        exec.AddStatusmessage("M6: tool change interrupted");
+        return false;
+    }
+    return true;
+};
+
+if(toolCurrentNumber > 0){
+    if(!toolCurrentStorable){
+        if(!ExecuteManualToolChange("M6: Tool Not Storable", ToolChangeAction.Unload, toolCurrentNumber, toolCurrentDesc)){
             return;
         }
 
@@ -164,8 +234,8 @@ if(toolCurrentNumber > 0){
             exec.Writekey(profileToolTableSlotSection, "Slot" + toolCurrentNumber, toolCurrentSlot.ToString());
         }
     }else{
-        // if current tool slot is not assigned (zero)
-        if(toolCurrentSlot < 1){
+        // if auto-assign enabled and current tool slot is not assigned (zero)
+        if(profileAutoAssignToolSlot && toolCurrentSlot < 1){
             // get current used slots
             var usedSlots = new System.Collections.Generic.List<int>();
             for(var i=1; i <= 96; i++){
@@ -194,32 +264,9 @@ if(toolCurrentNumber > 0){
 
         if(toolCurrentSlot < 1){
             // release current tool manually
-
-            var result = Prompt("M6: Tool Slot Unavailable", "Move to tool unload position for manually unload T" + toolCurrentNumber + "?\n" + toolCurrentDesc, "YesNoCancel", true);
-            if(result == DialogResult.Yes){
-                if(!ExecuteGCode("G00 G53 X" + toolManualPosition.X + " Y" + toolManualPosition.Y)){
-                    exec.AddStatusmessage("M6: tool change interrupted");
-                    return;
-                }
-            }else if(result != DialogResult.No){
-                exec.AddStatusmessage("Can not store T" + toolCurrentNumber + " in a slot");
-                exec.Callbutton(buttonCancel);
+            if(!ExecuteManualToolChange("M6: Tool Slot Unavailable", ToolChangeAction.Unload, toolCurrentNumber, toolCurrentDesc)){
                 return;
             }
-
-            result = Prompt("M6: Manual Tool Change", "Unload T" + toolCurrentNumber + " and press OK\n" + toolCurrentDesc, "OKCancel");
-            if(result != DialogResult.OK){
-                exec.AddStatusmessage("Manual tool change for T" + toolCurrentNumber + " was canceled");
-                exec.Callbutton(buttonCancel);
-                return;
-            }
-
-            // move back to safe Z - just in case
-            if(!ExecuteGCode("G00 G53 Z" + zSafe)){
-                exec.AddStatusmessage("M6: tool change interrupted");
-                return;
-            }
-
         }else{
             if(!ExecuteGCode(
                 // move to current tool slot
@@ -238,15 +285,15 @@ if(toolCurrentNumber > 0){
             while(counter < 3 && (counter < 1 || !AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, true))){
                 counter++;
                 if(counter > 1){
-                    ATCClose(atcOutputToolRelease, atcOutputPurge);
+                    ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
                 }
 
-                ATCOpen(atcOutputToolRelease, atcOutputPurge);
+                ATCOpen(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
             }
 
             // if tool not clamped and tool release
             if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, true)){
-                ATCClose(atcOutputToolRelease, atcOutputPurge);
+                ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
 
                 exec.Callbutton(buttonInterrupt);
                 Prompt("M6: Tool Change Failed", "Failed to release tool (ERR1)", "OK", true);
@@ -259,7 +306,7 @@ if(toolCurrentNumber > 0){
                 return;
             }
 
-            ATCClose(atcOutputToolRelease, atcOutputPurge);
+            ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
 
             // check if something is clamped in spindle
             if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, false)){
@@ -293,33 +340,11 @@ if(!exec.Ismacrostopped()) {
 
 // if new tool is not in a slot
 if(toolNewNumber > 0 && toolNewSlot < 1){
-    ATCClose(atcOutputToolRelease, atcOutputPurge);
+    ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
 
-    var result = Prompt("M6: Tool Missing", "Move to tool load position for manually load T" + toolNewNumber + "?\n" + toolNewDesc, "YesNoCancel", true);
-    if(result == DialogResult.Yes){
-        if(!ExecuteGCode("G00 G53 X" + toolManualPosition.X + " Y" + toolManualPosition.Y)){
-            exec.AddStatusmessage("M6: tool change interrupted");
-            return;
-        }
-    }else if(result != DialogResult.No){
-        exec.AddStatusmessage("T" + toolNewNumber + " not in a slot");
-        exec.Callbutton(buttonCancel);
+    if(!ExecuteManualToolChange("M6: Tool Missing", ToolChangeAction.Load, toolNewNumber, toolNewDesc)){
         return;
     }
-
-    result = Prompt("M6: Manual Tool Change", "Load T" + toolNewNumber + " and press OK\n" + toolNewDesc, "OKCancel");
-    if(result != DialogResult.OK){
-        exec.AddStatusmessage("Manual tool change for T" + toolNewNumber + " was canceled");
-        exec.Callbutton(buttonCancel);
-        return;
-    }
-
-    // move back to safe Z - just in case
-    if(!ExecuteGCode("G00 G53 Z" + zSafe)){
-        exec.AddStatusmessage("M6: tool change interrupted");
-        return;
-    }
-
 }else if (toolNewNumber > 0 ){
     if(!ExecuteGCode(
         // move to current tool slot
@@ -332,11 +357,11 @@ if(toolNewNumber > 0 && toolNewSlot < 1){
     }
 
     // open clamp
-    ATCOpen(atcOutputToolRelease, atcOutputPurge);
+    ATCOpen(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
 
     // check that clamp opened
     if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, true)){
-        ATCClose(atcOutputToolRelease, atcOutputPurge);
+        ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
         exec.Callbutton(buttonInterrupt);
         Prompt("M6: Tool Change Failed", "Failed to open clamp", "OK", true);
         return;
@@ -351,7 +376,7 @@ if(toolNewNumber > 0 && toolNewSlot < 1){
     }
 
     // close air and clamp
-    ATCClose(atcOutputToolRelease, atcOutputPurge);
+    ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
 
     // move Z axis back above tool clamp position
     if(!ExecuteGCode("G00 G53 Z" + Math.Max(zToolClamp + zRetract, zToolClamp))){
@@ -390,7 +415,7 @@ if(!exec.Ismacrostopped()) {
         // move back to original XY position
         "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y
     )){
-        ATCClose(atcOutputToolRelease, atcOutputPurge);
+        ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
         exec.AddStatusmessage("M6: tool change interrupted");
         return;
     }
@@ -401,7 +426,7 @@ if(!exec.Ismacrostopped()) {
         return;
     }
 }else{
-    ATCClose(atcOutputToolRelease, atcOutputPurge);
+    ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
     exec.AddStatusmessage("M6: tool change interrupted");
     return;
 }
@@ -421,20 +446,30 @@ private DialogResult Prompt(string title, string messsage, string button, bool w
     return result is DialogResult ? (DialogResult)result : DialogResult.None;
 }
 
-private void ATCOpen(PortPin outputDrawbar, PortPin outputAir) {
-    exec.Setoutpin(outputDrawbar.Port, outputDrawbar.Pin);
+private void ATCOpen(PortPin outputRelease, PortPin? outputClamp, PortPin outputAir) {
+    if(outputClamp != null){
+        exec.Clroutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
+        exec.Wait(250);
+    }
+
+    exec.Setoutpin(outputRelease.Port, outputRelease.Pin);
     exec.Wait(250);
 
     exec.Setoutpin(outputAir.Port, outputAir.Pin);
     exec.Wait(250);
 }
 
-private void ATCClose(PortPin outputDrawbar, PortPin outputAir) {
+private void ATCClose(PortPin outputRelease, PortPin? outputClamp, PortPin outputAir) {
     exec.Clroutpin(outputAir.Port, outputAir.Pin);
     exec.Wait(250);
 
-    exec.Clroutpin(outputDrawbar.Port, outputDrawbar.Pin);
+    exec.Clroutpin(outputRelease.Port, outputRelease.Pin);
     exec.Wait(250);
+
+    if(outputClamp != null){
+        exec.Setoutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
+        exec.Wait(250);
+    }
 }
 
 private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLed, bool releaseExpected) {
@@ -456,6 +491,13 @@ private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLe
 
     return result;
 }
+
+private enum ToolChangeAction {
+    Load,
+    Unload
+}
+
+delegate bool QTCDelegate (string title, ToolChangeAction action, int toolNumber, string toolDesc);
 
 private struct Position {
     public Position(double x, double y) {

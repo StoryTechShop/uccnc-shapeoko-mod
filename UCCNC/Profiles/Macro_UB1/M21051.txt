@@ -3,6 +3,7 @@
  * UCCNC v1.2115 or higher required, with Messages plugin enabled
  * 
  * Save tool table from Screenset (NEON) to profile
+ * Only used for when M6 is in auto-assign mode
  * Screenset Button "SAVE TOOLTABLE"
  */
 
@@ -13,6 +14,7 @@ if(result != DialogResult.Yes){
 
 // UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
 // we are resorting to using a custom section for tool slot in the profile to prevent losing data
+// See M6 macro for more details
 var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
 
 var fieldStartIdxToolSlot = 20800;
@@ -34,6 +36,8 @@ for(var i=1; i<=96; i++){
     exec.Writekey("Tooltablevalues", "ToolDia"+i, dia.ToString());
     exec.Writekey("Tooltablevalues", "Description"+i, desc);
 }
+
+exec.Callbutton(780);
 
 #Events
 // ### GLOBAL UTILS ###

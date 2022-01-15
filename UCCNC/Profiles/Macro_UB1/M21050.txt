@@ -1,11 +1,14 @@
 /**
  * Macro: M21050 Load Tool Table
+ *
  * Load tool table from profile to Screenset (NEON)
+* Only used for when M6 is in auto-assign mode
  * Screenset Button "RELOAD TOOLTABLE"
  */
 
 // UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
 // we are resorting to using a custom section for tool slot in the profile to prevent losing data
+// See M6 macro for more details
 var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
 
 var fieldStartIdxToolSlot = 20800;
