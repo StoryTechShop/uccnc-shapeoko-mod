@@ -22,17 +22,17 @@ var fieldStartIdxToolDia = 2500; // 2501-2596
 var fieldStartIdxToolDesc = 20700;
 
 for(var i=1; i<=96; i++){
-	var fieldStartIdxToolZ = i < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
+    var fieldStartIdxToolZ = i < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
 
-	var slot = int.Parse(AS3.Getfield(fieldStartIdxToolSlot+i));
-	var len = double.Parse(AS3.Getfield(fieldStartIdxToolZ+i));
-	var dia = double.Parse(AS3.Getfield(fieldStartIdxToolDia+i));
-	var desc = AS3.Getfield(fieldStartIdxToolDesc+i);
+    var slot = int.Parse(AS3.Getfield(fieldStartIdxToolSlot+i));
+    var len = double.Parse(AS3.Getfield(fieldStartIdxToolZ+i));
+    var dia = double.Parse(AS3.Getfield(fieldStartIdxToolDia+i));
+    var desc = AS3.Getfield(fieldStartIdxToolDesc+i);
 
-	exec.Writekey(profileToolTableSlotSection, "Slot"+i, slot.ToString());
-	exec.Writekey("Tooltablevalues", "TooloffsetZ"+i, len.ToString());
-	exec.Writekey("Tooltablevalues", "ToolDia"+i, dia.ToString());
-	exec.Writekey("Tooltablevalues", "Description"+i, desc);
+    exec.Writekey(profileToolTableSlotSection, "Slot"+i, slot.ToString());
+    exec.Writekey("Tooltablevalues", "TooloffsetZ"+i, len.ToString());
+    exec.Writekey("Tooltablevalues", "ToolDia"+i, dia.ToString());
+    exec.Writekey("Tooltablevalues", "Description"+i, desc);
 }
 
 #Events

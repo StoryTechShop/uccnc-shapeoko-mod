@@ -15,22 +15,22 @@ var fieldStartIdxToolDia = 2500; // 2501-2596
 var fieldStartIdxToolDesc = 20700;
 
 for(var i=1; i<=96; i++){
-	var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+i, "0"));
-	var len = double.Parse(exec.Readkey("Tooltablevalues", "TooloffsetZ"+i, "0.0"));
-	var dia = double.Parse(exec.Readkey("Tooltablevalues", "ToolDia"+i, "0.0"));
-	var desc = exec.Readkey("Tooltablevalues", "Description"+i, "");
-	var type = exec.Readkey("Tooltablevalues", "Type"+i, "");
+    var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+i, "0"));
+    var len = double.Parse(exec.Readkey("Tooltablevalues", "TooloffsetZ"+i, "0.0"));
+    var dia = double.Parse(exec.Readkey("Tooltablevalues", "ToolDia"+i, "0.0"));
+    var desc = exec.Readkey("Tooltablevalues", "Description"+i, "");
+    var type = exec.Readkey("Tooltablevalues", "Type"+i, "");
 
-	AS3.Setfieldtext(slot.ToString(), fieldStartIdxToolSlot+i);
-	AS3.Validatefield(fieldStartIdxToolSlot+i);
+    AS3.Setfieldtext(slot.ToString(), fieldStartIdxToolSlot+i);
+    AS3.Validatefield(fieldStartIdxToolSlot+i);
 
-	var fieldStartIdxToolZ = i < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
-	AS3.Setfieldtext(len.ToString(), fieldStartIdxToolZ+i);
-	AS3.Validatefield(fieldStartIdxToolZ+i);
+    var fieldStartIdxToolZ = i < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
+    AS3.Setfieldtext(len.ToString(), fieldStartIdxToolZ+i);
+    AS3.Validatefield(fieldStartIdxToolZ+i);
 
-	AS3.Setfieldtext(dia.ToString(), fieldStartIdxToolDia+i);
-	AS3.Validatefield(fieldStartIdxToolDia+i);
+    AS3.Setfieldtext(dia.ToString(), fieldStartIdxToolDia+i);
+    AS3.Validatefield(fieldStartIdxToolDia+i);
 
-	AS3.Setfieldtext(desc, fieldStartIdxToolDesc+i);
-	AS3.Validatefield(fieldStartIdxToolDesc+i);
+    AS3.Setfieldtext(desc, fieldStartIdxToolDesc+i);
+    AS3.Validatefield(fieldStartIdxToolDesc+i);
 }
