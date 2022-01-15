@@ -1,36 +1,67 @@
-// Monitor M3, M4, M7 and M8 to turn on/off ATC Seal
+/**
+ * Macro: M90000 ATC Air Seal
+ * Monitors Spindle, Coolant, VFD and ATC activity, enabling the air seal with a delay to turn back off
+ * Used as Autorun Macroloop
+ */
 
-DateTime ATCSealOnSince = DateTime.UtcNow;
-int ATCSeal_Port = 3; // OutputPT3PN4;
-int ATCSeal_Pin = 4; // OutputPT3PN4;
+// ### M90000 CONFIG ###
 
-int[] LEDs = new int[]{
-	50, // SpindleCW M3
-	51, // SpindleCCW M4
-	52, // Miston M7
-	53, // Floodon M8
-	86, // OutputPT3PN1 ATC Release
-	88, // OutputPT3PN3 ATC Purge
+// Delay in seconds before turning air seal off
+var atcAirSealOffDelaySecs = 3;
+
+// OUTPUT to engage air seal
+var atcOutputAirSeal = new PortPin(3, 4);
+var atcLEDAirSeal = 89; // OutputPT3PN4
+
+// LEDs (INPUT) to monitor
+var LEDs = new []{
+    new {Num = 50, State = true},	// SpindleCW M3
+    new {Num = 51, State = true},	// SpindleCCW M4
+    new {Num = 52, State = true}, 	// Miston M7
+    new {Num = 53, State = true}, 	// Floodon M8
+    new {Num = 86, State = true}, 	// OutputPT3PN1 ATC Release
+    new {Num = 88, State = true}, 	// OutputPT3PN3 ATC Purge
+    new {Num = 95, State = false},	// OutputPT3PN10 VFD Running - Inverted Signal (false)
 };
 
-while(loop) {
+// ### M90000 MACROLOOP ###
 
-	if(
-		Array.FindIndex(LEDs, l => exec.GetLED(l)) > -1
-		|| !exec.GetLED(95) // OutputPT3PN10 VFD Running
-	){
-		exec.Setoutpin(ATCSeal_Port, ATCSeal_Pin);
-		ATCSealOnSince = DateTime.UtcNow;
-	}else{
-		// Delay turning off ATC Seal by 3 seconds
-		TimeSpan elapsed = DateTime.UtcNow - ATCSealOnSince;
-		if(elapsed.TotalSeconds > 3.0){
-			exec.Clroutpin(ATCSeal_Port, ATCSeal_Pin);
-		}
-	}
+DateTime atcSealOnSince = DateTime.UtcNow;
 
-	Thread.Sleep(50);
+while(loop && !exec.Ismacrostopped()) {
+
+    if(
+        // Check if any LEDs equal the expected state for air to be on
+        Array.FindIndex(LEDs, led => exec.GetLED(led.Num) == led.State) > -1
+        && exec.GetLED(atcLEDAirSeal) != true
+    ){
+        exec.Setoutpin(atcOutputAirSeal.Port, atcOutputAirSeal.Pin);
+        atcSealOnSince = DateTime.UtcNow;
+    }else if(
+        exec.GetLED(atcLEDAirSeal) != false
+    ){
+        // Delay turning off ATC Seal by 3 seconds
+        TimeSpan elapsed = DateTime.UtcNow - atcSealOnSince;
+        if(elapsed.TotalSeconds > atcAirSealOffDelaySecs){
+            exec.Clroutpin(atcOutputAirSeal.Port, atcOutputAirSeal.Pin);
+        }
+    }
+
+    Thread.Sleep(50);
 }
 
 // Turn off ATC Seal on stop
-exec.Clroutpin(ATCSeal_Port, ATCSeal_Pin);
+exec.Clroutpin(atcOutputAirSeal.Port, atcOutputAirSeal.Pin);
+
+#Events
+// ### GLOBAL UTILS ###
+
+private struct PortPin {
+    public PortPin(int port, int pin) {
+        this.Port = port;
+        this.Pin = pin;
+    }
+
+    public int Port;
+    public int Pin;
+}
