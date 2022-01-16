@@ -137,8 +137,8 @@ var originalPosition = new Position(exec.GetXmachpos(), exec.GetYmachpos());
 var originalModal = AS3.Getfield(877).Split('|');
 
 if(!ExecuteGCode(
-    // stop spindle
-    "M5",
+    // stop coolant and spindle
+    "M9", "M5",
     // move to safe z
     "G90 G00 G53 Z" + zSafe
 )){
