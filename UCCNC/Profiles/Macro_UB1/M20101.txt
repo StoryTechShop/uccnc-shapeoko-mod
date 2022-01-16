@@ -14,7 +14,7 @@ double zSafe = 0.0D;
 // manual tool change position
 var toolManualPosition = new Position(-9.0D, -18.0D); // position for manual tool changes - TODO change to a Park location instead?
 // enable prompts to engage tool release and clamp
-var toolManualATCPrompts = true;
+var toolManualATCPrompts = false;
 
 // OUTPUT to engage tool release
 var atcOutputToolRelease = new PortPin(3, 1);
