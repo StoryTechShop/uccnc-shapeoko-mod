@@ -6,38 +6,40 @@
 
 // UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
 // we are resorting to using a custom section for tool slot in the profile to prevent losing data
+// If M6 profileAutoAssignToolSlot is false, use UCCNC "Tooltablevalues" instead
 var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
 
-var slotToolNumbers = new int[9];
+var gcode = new List<string>(new string[]{"G49"});
 
 // go through tool table finding tools with an assigned slot number
-for(var i=1; i<=96; i++){
-    var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+i, "0"));
-    if(slot > 0 && slot < slotToolNumbers.Length){
-        slotToolNumbers[slot] = i;
+for(var toolNum=1; toolNum<=96; toolNum++){
+    var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+toolNum, "0"));
+    if(slot > 0){
+        gcode.Add("T" + toolNum + " M6 E1 M31");
     }
 }
 
-foreach(var toolNumber in slotToolNumbers){
-    if(toolNumber < 1){ continue; }
+// check if any tools where added to measure
+if(gcode.Count < 2){
+    exec.AddStatusmessage("M31 ALL ATC: No tools to measure");
+    return;
+}
 
-    exec.AddStatusmessage("Measuring tool offset for T" + toolNumber);
+// add original tool and modal to restore
+gcode.Add("T" + exec.Getcurrenttool() + " M6");
+gcode.Add(String.Join(" ", AS3.Getfield(877).Split('|')));
 
-    if(!exec.Ismacrostopped()) {
-        exec.Code("T" + toolNumber + " M6");
-        while(exec.Ismacrorunning(6) > 0){}
-        while(exec.IsMoving()){}
-    }else{
-        exec.AddStatusmessage("M20102 interrupted");
-        return;
-    }
+if(!ExecuteGCode(gcode.ToArray())){
+    exec.AddStatusmessage("M31 ALL ATC: Tool change and offset interrupted");
+    return;
+}
 
-    if(!exec.Ismacrostopped()) {
-        exec.Code("M31");
-        while(exec.Ismacrorunning(31) > 0){}
-        while(exec.IsMoving()){}
-    }else{
-        exec.AddStatusmessage("M20102 interrupted");
-        return;
-    }	
+#Events
+// ### GLOBAL UTILS ###
+
+private bool ExecuteGCode(params string[] code) {
+    exec.Codelist(new List<string>(code));
+    while(exec.IsMoving()){}
+
+    return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
 }
