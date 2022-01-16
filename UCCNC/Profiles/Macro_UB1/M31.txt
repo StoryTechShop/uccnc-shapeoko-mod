@@ -8,22 +8,33 @@
 
 // ### M31 CONFIG ###
 
-var atcLEDToolClamp = 96; // INPUT to detect if a tool is clamped (InputPT3PN11)
-var atcLEDToolRelease = 97; // INPUT to detect drawbar release (InputPT3PN12)
+// INPUT to detect if a tool is clamped
+var atcLEDToolClamp = 96; // InputPT3PN11
+// INPUT to detect tool release
+var atcLEDToolRelease = 97; // InputPT3PN12
 
-var buttonInterrupt = 130; // Interrupt from failure: 130=Cycle Stop or 512=RESET
-var buttonCancel = 130; // Cancel from user: 130=Cycle Stop or 512=RESET
+// Interrupt from failure: 130=Cycle Stop or 512=RESET
+var buttonInterrupt = 130;
+// Cancel from user: 130=Cycle Stop or 512=RESET
+var buttonCancel = 130;
 
-double zSafe = 0.0D; // safe Z position for travel
-var probeZ = -5.0D; // Max Z machine position to probe to
+// safe Z position for travel
+double zSafe = 0.0D;
+// Max Z machine position to probe to
+var probeZ = -5.0D;
 
+// get retract setting from probe plugin
 var probeRetract = double.Parse(AS3.Getfield(2707)); // Retract
+// get fast feed rate setting from probe plugin
 var probeFastFeed = double.Parse(AS3.Getfield(2709)); // FastFeed
+// get fine feed rate setting from probe plugin
 var probeFineFeed = double.Parse(AS3.Getfield(2710)); // FineFeed
 
+// get the fixed probe location setting from probe plugin
 var probePosition = new Position(double.Parse(AS3.Getfield(2726)), double.Parse(AS3.Getfield(2727))); // FixedProbePosX, FixedProbePosY
 var probePositionZ = double.Parse(AS3.Getfield(2728)); // FixedProbePosZ
 
+// starting numbers to calculate z offset field number
 var fieldStartIdxToolZ_1 = 195; // 196-215 - T1-20
 var fieldStartIdxToolZ_2 = 900; // 921-996 - T21-96
 
