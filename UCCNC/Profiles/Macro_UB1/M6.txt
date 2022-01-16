@@ -3,7 +3,8 @@
  * UCCNC v1.2115 or higher required, with Messages plugin enabled
  * 
  * Unload current tool to load new tool
- * Moves back to XY position after tool change
+ * M6 [En]
+ * - E: 1 = disable moving back to original XY position (optional, defaults to true)
  * 
  * Unloading Current Tool:
  *  If tool has "Probe" or "NoStore" tag in tool type field, will prompt for manually unloading tool
@@ -108,6 +109,9 @@ var buttonInterrupt = 130;
 var buttonCancel = 130;
 
 // ### M6 MACRO ###
+
+// get E argument, to determine if restoring the XY position after tool change
+var restorePosition = (Allvars != null ? Allvars.Evar == 0 : true);
 
 var toolCurrentNumber = exec.Getcurrenttool();
 var toolNewNumber = exec.Getnewtool();
@@ -435,7 +439,7 @@ if(!exec.Ismacrostopped()) {
         // move to safe z
         "G00 G53 Z" + zSafe,
         // move back to original XY position
-        "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y
+        (restorePosition ? "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y : "G4 P0")
     )){
         ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
         exec.AddStatusmessage("M6: tool change interrupted");
