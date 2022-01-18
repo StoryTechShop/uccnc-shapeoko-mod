@@ -298,20 +298,24 @@ if(toolCurrentNumber > 0){
             }
 
             if(emptySlot > 0){
-                exec.AddStatusmessage("M6: Assigning T" + toolCurrentNumber + " to empty slot #" + emptySlot);
+                exec.AddStatusmessage("M6: assigning T" + toolCurrentNumber + " to empty slot #" + emptySlot);
                 // save slot to current tool
                 toolCurrentSlot = emptySlot;
                 exec.Writekey(profileToolTableSlotSection, "Slot" + toolCurrentNumber, toolCurrentSlot.ToString());
+            }else{
+                exec.AddStatusmessage("M6: no available tool slots for T" + toolCurrentNumber);
             }
         }
 
         if(toolCurrentSlot < 1){
             // release current tool manually
-            if(!ExecuteManualToolChange("Tool slots full, manual tool change required", ToolChangeAction.Unload, toolCurrentNumber, toolCurrentDesc, toolNewIsManual)){
+            if(!ExecuteManualToolChange("Tool not assigned slot, manual tool change required", ToolChangeAction.Unload, toolCurrentNumber, toolCurrentDesc, toolNewIsManual)){
                 return;
             }
         }else{
             // unload/release tool via ATC
+
+            exec.AddStatusmessage("M6: unloading T" + toolCurrentNumber + " into slot #" + toolCurrentSlot);
 
             var toolSlotPosition = toolSlots[toolCurrentSlot];
             var toolSlotOffsetPosition = new Position(toolSlotPosition.X + toolChangeSlotOffset.X, toolSlotPosition.Y + toolChangeSlotOffset.Y);
@@ -339,6 +343,7 @@ if(toolCurrentNumber > 0){
             while(counter < 3 && (counter < 1 || !AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, true))){
                 counter++;
                 if(counter > 1){
+                    exec.AddStatusmessage("M6: retrying to eject T" + toolCurrentNumber + ", attempt #" + counter);
                     ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
                 }
 
@@ -350,7 +355,8 @@ if(toolCurrentNumber > 0){
                 ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
 
                 exec.Callbutton(buttonInterrupt);
-                Prompt("M6: Tool Change Failed", "Failed to release tool (ERR1)", "OK", true);
+                exec.AddStatusmessage("M6: failed to eject T" + toolCurrentNumber);
+                Prompt("M6: Tool Change Failed", "Failed to eject T" + toolCurrentNumber + "\n" + toolNewDesc, "OK", true);
                 return;
             }
 
@@ -364,10 +370,11 @@ if(toolCurrentNumber > 0){
 
             ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
 
-            // check if something is clamped in spindle
+            // check that nothing is spindle
             if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, false)){
                 exec.Callbutton(buttonInterrupt);
-                Prompt("M6: Tool Change Failed", "Failed to release tool (ERR2)", "OK", true);
+                exec.AddStatusmessage("M6: failed to eject T" + toolCurrentNumber + " or close drawbar");
+                Prompt("M6: Tool Change Failed", "Failed to eject tool or close drawbar", "OK", true);
                 return;
             }
 
@@ -387,7 +394,8 @@ if(toolCurrentNumber > 0){
 // nothing should be in spindle at this point - allow being in release position
 if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease)){
     exec.Callbutton(buttonInterrupt);
-    Prompt("M6: Tool Change Failed", "Spindle not empty", "OK", true);
+    exec.AddStatusmessage("M6: spindle not empty or drawbar ajar");
+    Prompt("M6: Tool Change Failed", "Spindle not empty or drawbar ajar", "OK", true);
     return;
 }
 
@@ -405,6 +413,8 @@ if(toolNewIsManual){
     }
 }else if (toolNewNumber > 0 ){
     // load/clamp tool via ATC
+
+    exec.AddStatusmessage("M6: loading T" + toolNewNumber + " from slot #" + toolNewSlot + " into spindle");
 
     var toolSlotPosition = toolSlots[toolNewSlot];
     var toolSlotOffsetPosition = new Position(toolSlotPosition.X + toolChangeSlotOffset.X, toolSlotPosition.Y + toolChangeSlotOffset.Y);
@@ -430,7 +440,8 @@ if(toolNewIsManual){
     if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, true)){
         ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
         exec.Callbutton(buttonInterrupt);
-        Prompt("M6: Tool Change Failed", "Failed to open clamp", "OK", true);
+        exec.AddStatusmessage("M6: failed to open drawbar for T" + toolNewNumber);
+        Prompt("M6: Tool Change Failed", "Failed to open drawbar for T" + toolNewNumber + "\n" + toolNewDesc, "OK", true);
         return;
     }
 
@@ -451,7 +462,8 @@ if(toolNewIsManual){
     // check tool is clamped
     if(!AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
         exec.Callbutton(buttonInterrupt);
-        Prompt("M6: Tool Change Failed", "Failed to clamp tool", "OK", true);
+        exec.AddStatusmessage("M6: failed to close drawbar and clamp T" + toolNewNumber);
+        Prompt("M6: Tool Change Failed", "Failed to close drawbar and clamp T" + toolNewNumber + "\n" + toolNewDesc, "OK", true);
         return;
     }
 
@@ -469,7 +481,8 @@ if(toolNewIsManual){
     // check (again) tool is clamped
     if(!AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
         exec.Callbutton(buttonInterrupt);
-        Prompt("M6: Tool Change Failed", "Failed to clamp tool", "OK", true);
+        exec.AddStatusmessage("M6: failed to close drawbar and clamp T" + toolNewNumber);
+        Prompt("M6: Tool Change Failed", "Failed to close drawbar and clamp T" + toolNewNumber + "\n" + toolNewDesc, "OK", true);
         return;
     }
 
@@ -487,7 +500,9 @@ if(toolNewIsManual){
 // check if nothing is clamped in spindle
 if(toolNewNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
     exec.Callbutton(buttonInterrupt);
-    Prompt("M6: Tool Change Failed", "Tool not in spindle", "OK", true);
+    exec.AddStatusmessage("M6: spindle not empty or jammed drawbar");
+    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + "not in spindle or drawbar ajar", "OK", true);
+    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + "not in spindle or drawbar ajar\n" + toolNewDesc, "OK", true);
     return;
 }
 
@@ -495,19 +510,13 @@ if(!exec.Ismacrostopped()) {
     exec.Setcurrenttool(toolNewNumber);
     
     if(!ExecuteGCode(
-        // apply tool offset if enabled
-        (applyToolOffset ? "G43 H" + toolNewNumber : ""),
         // move to safe z
         "G00 G53 Z" + zSafe,
         // move back to original XY position if enabled
-        (restoreXYPosition ? "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y : "")
-    )){
-        exec.AddStatusmessage("M6: tool change interrupted");
-        return;
-    }
-
-    // restore modal
-    if(!ExecuteGCode(
+        (restoreXYPosition ? "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y : ""),
+        // apply tool offset if enabled
+        (applyToolOffset ? "G43 H" + toolNewNumber : ""),
+        // restore modal
         String.Join(" ", Array.FindAll(originalModal,
             // if applyToolOffset, filter out original G43/G49
             modal => !applyToolOffset || (!modal.StartsWith("G43") && modal != "G49")
@@ -530,7 +539,9 @@ private bool ExecuteGCode(params string[] lines) {
     var gcode = new List<string>(lines);
     // gcode.ForEach(line =>  exec.AddStatusmessage(line));
     exec.Codelist(gcode);
-    while(exec.IsMoving()){}
+    while(exec.IsMoving()){
+        exec.Wait(25);
+    }
 
     return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
 }
