@@ -12,7 +12,9 @@ if(!exec.Ismacrostopped()) {
     } else {
         exec.Code("G49");
     }
-    while(exec.IsMoving()){}
+    while(exec.IsMoving()){
+        exec.Wait(25);
+    }
 }else{
     exec.AddStatusmessage("M20100 interrupted");
     return;

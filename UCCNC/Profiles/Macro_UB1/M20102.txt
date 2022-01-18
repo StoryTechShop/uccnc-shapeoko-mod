@@ -39,7 +39,9 @@ if(!ExecuteGCode(gcode.ToArray())){
 
 private bool ExecuteGCode(params string[] code) {
     exec.Codelist(new List<string>(code));
-    while(exec.IsMoving()){}
+    while(exec.IsMoving()){
+        exec.Wait(25);
+    }
 
     return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
 }
