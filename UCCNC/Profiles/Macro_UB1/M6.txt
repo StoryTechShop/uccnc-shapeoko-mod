@@ -46,23 +46,36 @@ var profileAutoAssignToolSlot = true;
 // we are resorting to using a custom section for tool slot in the profile to prevent losing data if auto assign is enabled
 var profileToolTableSlotSection = profileAutoAssignToolSlot ? "M6ToolTable" : "Tooltablevalues";
 
+// should restore to original the XY position after successful tool change
+var restoreXYPosition = false;
+// should apply G43 tool offset after successful tool change
+var applyToolOffset = false;
+
 // safe Z position for travel
 double zSafe = 0.0D;
 
 // Z position to release tool
-double zToolRelease = -5.0250D;
+double toolChangeReleaseZ = -5.0250D;
 // Z position to clamp tool
-double zToolClamp = zToolRelease;
+double toolChangeClampZ = toolChangeReleaseZ;
 
-// distance above tool release/clamp position to feed and toggle air purge
-double zRetract = 0.5D;
 // feedrate when moving to or out of tool release/clamp position
-int zRetractFeed = 20; 
+int toolChangeFeedRate = 20;
 
-// manual tool change position
-var toolManualPosition = new Position(-9.0D, -18.0D); // position for manual tool changes - TODO change to a Park location instead?
-// enable prompts to engage tool release and clamp
-var toolManualATCPrompts = false;
+// distance above tool slot position to start tool change procedure with air purge and toolChangeFeedRate
+double toolChangeOffsetZ = 0.5D;
+
+// Whether to use toolChangeSlotOffset as side-[un]loading tool holder capture
+// for side loading, change toolChangeSlotOffset:
+//     (-1.0,0) for X side loading that starts offset from the tool slot by X-1.0 units
+//     (0.-1.0) for Y side loading that starts offset from the tool slot by Y-1.0 units
+var toolSlotIsSideLoad = false;
+
+// tool slot position offset for inital move before going to actual slot position
+// - can be used for side-[un]loading tool holder forks
+// - can be used to help reduce chances of traveling over tool rack
+// - ensure toolSlotIsSideLoad matches your setup!
+var toolChangeSlotOffset = new Position(0.0D, 0.0D);
 
 // tool slot XY positions
 var toolSlots = new Position[]{
@@ -85,6 +98,11 @@ var toolSlots = new Position[]{
     // Slot 8
     new Position(-2.9006D, -0.1346D),
 };
+
+// manual tool change position
+var toolManualPosition = new Position(-9.0D, -18.0D);
+// enable prompts to engage tool release and clamp
+var toolManualATCPrompts = false;
 
 // OUTPUT to engage tool release
 var atcOutputToolRelease = new PortPin(3, 1);
@@ -109,9 +127,6 @@ var buttonInterrupt = 130;
 var buttonCancel = 130;
 
 // ### M6 MACRO ###
-
-// get E argument, to determine if restoring the XY position after tool change
-var restorePosition = (Allvars != null ? Allvars.Evar == 0 : true);
 
 var toolCurrentNumber = exec.Getcurrenttool();
 var toolNewNumber = exec.Getnewtool();
@@ -296,13 +311,24 @@ if(toolCurrentNumber > 0){
                 return;
             }
         }else{
+            // unload/release tool via ATC
+
+            var toolSlotPosition = toolSlots[toolCurrentSlot];
+            var toolSlotOffsetPosition = new Position(toolSlotPosition.X + toolChangeSlotOffset.X, toolSlotPosition.Y + toolChangeSlotOffset.Y);
+
             if(!ExecuteGCode(
-                // move to current tool slot
-                "G00 G53 X" + toolSlots[toolCurrentSlot].X + " Y" + toolSlots[toolCurrentSlot].Y,
-                // move Z axis above tool release position
-                "G00 G53 Z" + Math.Max(zToolRelease + zRetract, zToolRelease),
-                // move Z axis to tool release position
-                "G01 G53 F" + zRetractFeed + " Z" + zToolRelease
+                // move to safe z
+                "G00 G53 Z" + zSafe,
+                // move to tool slot offset position
+                "G00 G53 X" + toolSlotOffsetPosition.X + " Y" + toolSlotOffsetPosition.Y,
+                // move to tool slot position (if top-unload)
+                (toolSlotIsSideLoad ? "" : "G00 G53 X" + toolSlotPosition.X + " Y" + toolSlotPosition.Y),
+                // move Z axis to tool release position, with offset if not side-load
+                "G00 G53 Z" + (toolSlotIsSideLoad ? toolChangeReleaseZ : Math.Max(toolChangeReleaseZ + toolChangeOffsetZ, toolChangeReleaseZ)),
+                // move Z axis to tool release position (if top-load)
+                (toolSlotIsSideLoad ? "" : "G01 G53 F" + toolChangeFeedRate + " Z" + toolChangeReleaseZ),
+                // move to tool slot position (if side-unload)
+                (toolSlotIsSideLoad ? "G01 G53 F" + toolChangeFeedRate + " X" + toolSlotPosition.X + " Y" + toolSlotPosition.Y : "")
             )){
                 exec.AddStatusmessage("M6: tool change interrupted");
                 return;
@@ -319,7 +345,7 @@ if(toolCurrentNumber > 0){
                 ATCOpen(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge);
             }
 
-            // if tool not clamped and tool release
+            // check if tool released
             if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, true)){
                 ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
 
@@ -329,7 +355,9 @@ if(toolCurrentNumber > 0){
             }
 
             // move Z axis up
-            if(!ExecuteGCode("G01 G53 F" + zRetractFeed + " Z" + Math.Min(zToolRelease + zRetract, zSafe))){
+            if(!ExecuteGCode(
+                "G01 G53 F" + toolChangeFeedRate + " Z" + Math.Min(toolChangeReleaseZ + toolChangeOffsetZ, zSafe))
+            ){
                 exec.AddStatusmessage("M6: tool change interrupted");
                 return;
             }
@@ -343,8 +371,12 @@ if(toolCurrentNumber > 0){
                 return;
             }
 
-            // move back to safe Z
-            if(!ExecuteGCode("G00 G53 Z" + zSafe)){
+            if(!ExecuteGCode(
+                // move back to safe Z
+                "G00 G53 Z" + zSafe,
+                // move to tool slot offset position (prevents traveling over tool slots)
+                "G00 G53 X" + toolSlotOffsetPosition.X + " Y" + toolSlotOffsetPosition.Y
+            )){
                 exec.AddStatusmessage("M6: tool change interrupted");
                 return;
             }
@@ -372,11 +404,20 @@ if(toolNewIsManual){
         return;
     }
 }else if (toolNewNumber > 0 ){
+    // load/clamp tool via ATC
+
+    var toolSlotPosition = toolSlots[toolNewSlot];
+    var toolSlotOffsetPosition = new Position(toolSlotPosition.X + toolChangeSlotOffset.X, toolSlotPosition.Y + toolChangeSlotOffset.Y);
+
     if(!ExecuteGCode(
-        // move to current tool slot
-        "G00 G53 X" + toolSlots[toolNewSlot].X + " Y" + toolSlots[toolNewSlot].Y,
-        // move Z axis above tool clamp position
-        "G00 G53 Z" + Math.Max(zToolClamp + zRetract, zToolClamp)
+        // move to safe z
+        "G00 G53 Z" + zSafe,
+        // move to tool slot offset position
+        "G00 G53 X" + toolSlotOffsetPosition.X + " Y" + toolSlotOffsetPosition.Y,
+        // move to tool slot position
+        "G00 G53 X" + toolSlotPosition.X + " Y" + toolSlotPosition.Y,
+        // move Z axis to tool clamp position with offset
+        "G00 G53 Z" + Math.Max(toolChangeClampZ + toolChangeOffsetZ, toolChangeClampZ)
     )){
         exec.AddStatusmessage("M6: tool change interrupted");
         return;
@@ -394,7 +435,10 @@ if(toolNewIsManual){
     }
 
     // move Z axis down to tool clamp position
-    if(!ExecuteGCode("G01 G53 F" + zRetractFeed + " Z" + zToolClamp)){
+    if(!ExecuteGCode(
+        // move Z axis to tool clamp position
+        "G01 G53 F" + toolChangeFeedRate + " Z" + toolChangeClampZ
+    )){
         exec.AddStatusmessage("M6: tool change interrupted");
         // Movement was interrupted, so might not be safe to close automatically
         Prompt("M6: Tool Change Interrupted", "Manual closure of ATC is required", "OK", true);
@@ -404,12 +448,6 @@ if(toolNewIsManual){
     // close air and clamp
     ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
 
-    // move Z axis back above tool clamp position
-    if(!ExecuteGCode("G00 G53 Z" + Math.Max(zToolClamp + zRetract, zToolClamp))){
-        exec.AddStatusmessage("M6: tool change interrupted");
-        return;
-    }
-
     // check tool is clamped
     if(!AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
         exec.Callbutton(buttonInterrupt);
@@ -417,8 +455,30 @@ if(toolNewIsManual){
         return;
     }
 
-    // move back to safe Z
-    if(!ExecuteGCode("G00 G53 Z" + zSafe)){
+    // remove tool from slot
+    if(!ExecuteGCode(
+        // if side-load, move to tool slot offset position
+        (toolSlotIsSideLoad ? "G01 G53 F" + toolChangeFeedRate + " X" + toolSlotOffsetPosition.X + " Y" + toolSlotOffsetPosition.Y : "" ),
+        // if top-load, move to tool clamp position with offset
+        (toolSlotIsSideLoad ? "" : "G00 G53 Z" + Math.Max(toolChangeClampZ + toolChangeOffsetZ, toolChangeClampZ))
+    )){
+        exec.AddStatusmessage("M6: tool change interrupted");
+        return;
+    }
+
+    // check (again) tool is clamped
+    if(!AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
+        exec.Callbutton(buttonInterrupt);
+        Prompt("M6: Tool Change Failed", "Failed to clamp tool", "OK", true);
+        return;
+    }
+
+     if(!ExecuteGCode(
+        // move back to safe Z
+        "G00 G53 Z" + zSafe,
+        // move to tool slot offset position (prevents traveling over tool slots)
+        "G00 G53 X" + toolSlotOffsetPosition.X + " Y" + toolSlotOffsetPosition.Y
+    )){
         exec.AddStatusmessage("M6: tool change interrupted");
         return;
     }
@@ -427,30 +487,36 @@ if(toolNewIsManual){
 // check if nothing is clamped in spindle
 if(toolNewNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
     exec.Callbutton(buttonInterrupt);
-    exec.Setcurrenttool(0);
     Prompt("M6: Tool Change Failed", "Tool not in spindle", "OK", true);
     return;
 }
 
 if(!exec.Ismacrostopped()) {
     exec.Setcurrenttool(toolNewNumber);
-
+    
     if(!ExecuteGCode(
+        // apply tool offset if enabled
+        (applyToolOffset ? "G43 H" + toolNewNumber : ""),
         // move to safe z
         "G00 G53 Z" + zSafe,
-        // move back to original XY position
-        (restorePosition ? "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y : "G4 P0")
+        // move back to original XY position if enabled
+        (restoreXYPosition ? "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y : "")
     )){
-        ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
         exec.AddStatusmessage("M6: tool change interrupted");
         return;
     }
 
     // restore modal
-    if(!ExecuteGCode(originalModal)){
+    if(!ExecuteGCode(
+        String.Join(" ", Array.FindAll(originalModal,
+            // if applyToolOffset, filter out original G43/G49
+            modal => !applyToolOffset || (!modal.StartsWith("G43") && modal != "G49")
+        ))
+    )){
         exec.AddStatusmessage("M6: tool change interrupted");
         return;
     }
+
 }else{
     ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
     exec.AddStatusmessage("M6: tool change interrupted");
@@ -460,8 +526,10 @@ if(!exec.Ismacrostopped()) {
 #Events
 // ### GLOBAL UTILS ###
 
-private bool ExecuteGCode(params string[] code) {
-    exec.Codelist(new List<string>(code));
+private bool ExecuteGCode(params string[] lines) {
+    var gcode = new List<string>(lines);
+    // gcode.ForEach(line =>  exec.AddStatusmessage(line));
+    exec.Codelist(gcode);
     while(exec.IsMoving()){}
 
     return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
