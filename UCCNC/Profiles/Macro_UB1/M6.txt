@@ -4,7 +4,6 @@
  * 
  * Unload current tool to load new tool
  * M6 [En]
- * - E: 1 = disable moving back to original XY position (optional, defaults to true)
  * 
  * Unloading Current Tool:
  *  If tool has "Probe" or "NoStore" tag in tool type field, will prompt for manually unloading tool
