@@ -227,7 +227,7 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
         if(!toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
             result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to continue\n" + toolDesc, "OKCancel");
         }else{
-            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press Yes to measure tool offset, otherwise No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
+            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press Yes to measure tool offset, No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
         }
 
         if(result == DialogResult.Yes){
@@ -270,7 +270,7 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
             if(!toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
                 result = Prompt("M6: Manual Tool Change", "Press OK to continue", "OKCancel");
             }else{
-                result = Prompt("M6: Manual Tool Change", "Press Yes to measure tool offset for T" + toolNumber + ", otherwise No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
+                result = Prompt("M6: Manual Tool Change", "Press Yes to measure tool offset for T" + toolNumber + ", No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
             }
 
             if(result == DialogResult.Yes){
@@ -527,9 +527,8 @@ if(toolNewIsManual){
 // check if nothing is clamped in spindle
 if(toolNewNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
     exec.Callbutton(buttonInterrupt);
-    exec.AddStatusmessage("M6: spindle not empty or jammed drawbar");
-    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + "not in spindle or drawbar ajar", "OK", true);
-    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + "not in spindle or drawbar ajar\n" + toolNewDesc, "OK", true);
+    exec.AddStatusmessage("M6: T" + toolNewNumber + " not in spindle or drawbar ajar");
+    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + " not in spindle or drawbar ajar\n" + toolNewDesc, "OK", true);
     return;
 }
 
@@ -537,6 +536,7 @@ if(!exec.Ismacrostopped()) {
     exec.Setcurrenttool(toolNewNumber);
     
     if(toolNewNumber > 0 && toolOffsetProbeAfterToolChange){
+        exec.AddStatusmessage("M6: executing tool offset probe " + toolOffsetProbeMacro);
         if(!ExecuteGCode(toolOffsetProbeMacro)){
             exec.AddStatusmessage("M6: tool change interrupted");
             return;
