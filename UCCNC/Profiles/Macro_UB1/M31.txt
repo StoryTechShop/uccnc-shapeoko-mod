@@ -63,7 +63,7 @@ var offsetCurrentZ = offsetNumber > 0 ? double.Parse(AS3.Getfield(fieldStartIdxT
 
 if(toolBreakageTolerance != null && toolBreakageTolerance < 0.0D){
     exec.Callbutton(buttonInterrupt);
-    exec.AddStatusmessage("M31: E" + toolBreakageTolerance + " tool tolerance must be absolute value");
+    exec.AddStatusmessage("M31: E" + FormatD(toolBreakageTolerance) + " tool tolerance must be absolute value");
     return;
 }
 
@@ -80,11 +80,19 @@ if(offsetNumber < 1 || offsetNumber > 96){
     return;
 }
 
- // If machine was not homed then it is unsafe to move in machine coordinates, stop here...
+ // check if machine is homed/referenced
 if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
 {
     exec.Callbutton(buttonInterrupt);
     Prompt("M31: Tool Offset Probe", "Machine is not homed", "OK", true);
+    return;
+}
+
+ // check if fixed probed location is set
+if(!exec.GetLED(307))
+{
+    exec.Callbutton(buttonInterrupt);
+    Prompt("M31: Tool Offset Probe", "Fixed probe location not saved", "OK", true);
     return;
 }
 
@@ -213,22 +221,25 @@ if(!exec.Ismacrostopped()){
         // check for tool is with-in tollerance
         var offsetDifference = Math.Abs(offsetCurrentZ - offsetToolZ);
         if(offsetDifference > toolBreakageTolerance){
-            exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measured Z" + offsetToolZ);
-            exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measurement is out of tolerance: " + offsetDifference + ">" + toolBreakageTolerance);
+            exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measured Z" + FormatD(offsetToolZ) + "; currently Z" + FormatD(offsetCurrentZ));
+            exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measurement is out of tolerance: " + FormatD(offsetDifference) + ">" + FormatD(toolBreakageTolerance));
             exec.Callbutton(buttonInterrupt);
             Prompt("M31: Tool Offset Probe", "Tool breakage detected for T" + toolCurrentNumber + " H" + offsetNumber, "OK", true);
             return;
+        }else{
+            exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measured Z" + FormatD(offsetToolZ) + "; currently Z" + FormatD(offsetCurrentZ));
+            exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measurement is with-in tolerance: " + FormatD(offsetDifference) + "<=" + FormatD(toolBreakageTolerance));
         }
     }
 
     // update tool master
     if(offsetNumber == toolMasterNumber){
-        exec.AddStatusmessage("M31: Setting global master tool reference to Z" + offsetProbeZ);
+        exec.AddStatusmessage("M31: Setting global master tool reference to Z" + FormatD(offsetProbeZ));
         exec.Writekey("M31Macro", "MasterToolProbeZ", offsetProbeZ.ToString());
     }
 
     // update tool offset in tool table field
-    exec.AddStatusmessage("M31: Setting H" + offsetNumber + " tool offset to Z" + offsetToolZ);
+    exec.AddStatusmessage("M31: Setting H" + offsetNumber + " tool offset to Z" + FormatD(offsetToolZ));
     AS3.Setfieldtext(offsetToolZ.ToString(), fieldStartIdxToolZ+offsetNumber);
     AS3.Validatefield(fieldStartIdxToolZ+offsetNumber);
 
@@ -267,14 +278,21 @@ if(!exec.Ismacrostopped()){
 // ### GLOBAL UTILS ###
 
 private bool ExecuteGCode(params string[] lines) {
+    if(exec.Ismacrostopped() || exec.GetLED(25)){
+        return false;
+    }
+
     var gcode = new List<string>(lines);
     // gcode.ForEach(line =>  exec.AddStatusmessage(line));
     exec.Codelist(gcode);
-    while(exec.IsMoving()){
-        exec.Wait(25);
-    }
+    while(exec.IsMoving()){}
 
-    return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    var result = !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    return result;
+}
+
+private string FormatD(double? num) {
+    return num != null ? String.Format("{0:0.0###}", num.Value) : "<null>";
 }
 
 private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
@@ -289,7 +307,7 @@ private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLe
 
     do{
         // dwell after first
-        if(debounce < 2 || retry < 4){ exec.Wait(250); }
+        if(debounce < 2 || retry < 4){ Thread.Sleep(250); }
 
         var clampState = exec.GetLED(clampLed);
         var releaseState = exec.GetLED(releaseLed);
