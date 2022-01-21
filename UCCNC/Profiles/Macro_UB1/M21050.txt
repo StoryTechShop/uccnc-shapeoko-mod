@@ -6,6 +6,10 @@
  * Screenset Button "RELOAD TOOLTABLE"
  */
 
+if(exec.Ismacrorunning(21050) > 1){
+    return;
+}
+
 // UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
 // we are resorting to using a custom section for tool slot in the profile to prevent losing data
 // See M6 macro for more details
