@@ -6,7 +6,7 @@
  * M6
  * 
  * Unloading Current Tool:
- *  If tool has "Probe" or "NoStore" tag in tool type field, will prompt for manually unloading tool
+ *  If tool has "NoStore" tag in tool type field, will prompt for manually unloading tool
  *  If current tool has no slot assigned, it is assigned next empty slot (profileAutoAssignToolSlot=true)
  *  If no empty slots are available, will prompt for manually unloading tool
  * 
