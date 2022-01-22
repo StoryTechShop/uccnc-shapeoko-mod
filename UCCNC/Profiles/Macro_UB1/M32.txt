@@ -1,0 +1,554 @@
+/**
+ * Macro: M32 Probe Routine
+ * Execute a Subroutine G-Code program
+ * M32 { Pn ... }
+ * - P: Probe routine to execute
+ */
+
+// ### M32 CONFIG ###
+
+// get retract setting from probe plugin
+var probeRetract = double.Parse(AS3.Getfield(2707)); // Retract
+// get fast feed rate setting from probe plugin
+var probeFastFeed = double.Parse(AS3.Getfield(2709)); // FastFeed
+// get fine feed rate setting from probe plugin
+var probeFineFeed = double.Parse(AS3.Getfield(2710)); // FineFeed
+
+// ### M32 MACRO ### 
+
+var pVar = Allvars != null ? (double?)Allvars.Pvar : null;
+if(!Validate(pVar != null, "M32: P is required, probe reoutine")){
+    return;
+}
+if(!Validate(pVar.Value % 1 == 0, "M32: P must be an integer, probe routine")){
+    return;
+}
+var pRoutine = (ProbeRoutine)(int)pVar.Value;
+if(!Validate(ProbeRoutines.ContainsKey(pRoutine), string.Format("M32: P{0} probe routine not found", (int)pRoutine))){
+    return;
+}
+
+var probeSettings = new ProbeSettings(probeRetract, probeFastFeed, probeFineFeed);
+
+var routine = ProbeRoutines[pRoutine];
+routine.Execute(this, probeSettings, Allvars);
+
+#Events
+// ### GLOBAL UTILS ###
+
+public bool ExecuteGCode(params string[] lines) {
+    var gcode = new List<string>(lines);    
+    // gcode.ForEach(line =>  exec.AddStatusmessage(line));
+    exec.Codelist(gcode);
+    while(exec.IsMoving()){
+        exec.Wait(25);
+    }
+
+    return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+}
+
+private string FormatD(double? num) {
+    return num != null ? String.Format("{0:0.0###}", num.Value) : "<null>";
+}
+
+public bool Validate(bool validation, string message) {
+    if(!validation){
+        exec.AddStatusmessage(message);
+    }
+    return validation;
+}
+
+private enum ProbeRoutine {
+    Surface = 1,
+    PocketOrWall = 2,
+    BoreOrBoss = 3,
+    BoreOrBoss3Point = 4,
+    InternalCorner = 5,
+    ExternalCorner = 6,
+    SurfaceAngle = 7
+}
+
+private enum ProbeOutputVar {
+    XPosition = 2100,
+    YPosition = 2101,
+    ZPosition = 2102,
+    XError = 2110,
+    YError = 2111,
+    ZError = 2112,
+
+    XAngle = 2120,
+    YAngle = 2121,
+    XAngleError = 2130,
+    YAngleError = 2131,
+
+    Measure = 2140,
+    MeasureError = 2141,
+
+    PositionError = 2150
+}
+
+private enum GetVarResult {
+    Invalid = -1,
+    Missing = 0,
+    Successful = 1,
+}
+
+private enum Axis {
+    X,
+    Y,
+    Z
+}
+
+private struct ProbeSettings {
+    public ProbeSettings(double retract, double fast, double fine) : this() {
+        this.Retract = retract;
+        this.FastFeedRate = fast;
+        this.FineFeedRate = fine;
+    }
+
+    public double Retract { get; private set; }
+    public double FastFeedRate { get; private set; }
+    public double FineFeedRate { get; private set; }
+}
+
+private struct ProbeInput {
+    public ProbeInput(char letter, string name, bool required, char[] orLetter = null) : this() {
+        this.Letter = letter;
+        this.Name = name;
+        this.IsRequired = required;
+        this.IsInteger = false;
+        this.MinValue = null;
+        this.MaxValue = null;
+        this.Or = orLetter ?? new char[0];
+    }
+
+    public ProbeInput(char letter, string name, bool required, bool integer, int? min, int? max, char[] orLetter = null)
+    : this(letter, name, required, orLetter) {
+        this.IsInteger = integer;
+        this.MinValue = min;
+        this.MaxValue = max;
+    }
+
+    public char Letter { get; private set; }
+    public string Name { get; private set; }
+    public bool IsRequired{ get; private set; }
+    public bool IsInteger { get; private set; }
+    public int? MinValue { get; private set; }
+    public int? MaxValue { get; private set; }
+
+    public char[] Or { get; private set; }
+}
+
+static Dictionary<ProbeRoutine, ProbeRoutineBase> ProbeRoutines = CreateProbeRoutines();
+static private Dictionary<ProbeRoutine, ProbeRoutineBase> CreateProbeRoutines() {
+    var routines = new Dictionary<ProbeRoutine, ProbeRoutineBase>();
+    foreach(var routineType in Array.FindAll(typeof(ProbeRoutineBase).Assembly.GetTypes(), t => t.IsClass && !t.IsAbstract && typeof(ProbeRoutineBase).IsAssignableFrom(t))){
+        var routine = (ProbeRoutineBase)Activator.CreateInstance(routineType);
+        routines.Add(routine.Routine, routine);
+    }
+    return routines;
+}
+
+/**
+ * U: Tool wear update tolerance limit
+ * V: Tool wear update threshold
+ */
+
+private abstract class ProbeRoutineBase {
+    protected ProbeRoutineBase() {
+        Inputs = new List<ProbeInput>(new []{
+            new ProbeInput('Q', "probe overtravel threshold", true),
+            new ProbeInput('W', "WCS index", false, true, 1, 6 ),
+            // new ProbeInput('O', "increment feature or component", false, true, 1, 2 ),
+        });
+    }
+
+    abstract public ProbeRoutine Routine { get; }
+    abstract public string Help();
+    abstract protected bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs);
+
+    protected List<ProbeInput> Inputs { get; private set; }
+
+    public bool Execute(Macroclass macro, ProbeSettings settings, UCCNC.Allvarstruct allVars) {
+        var vars = new Dictionary<char, double?>();
+        if(allVars != null){
+            foreach (var prop in allVars.GetType().GetFields()) {
+                if(prop.Name.Length != 4 || !prop.Name.EndsWith("var")){ continue; }
+                var value = (double?)prop.GetValue(allVars);
+                vars.Add(prop.Name[0], value);
+            }
+        }
+
+        var inputs = new Dictionary<char, double>();
+        foreach (var input in this.Inputs) {
+            var value = vars.ContainsKey(input.Letter) ? vars[input.Letter] : null;
+
+            if(!macro.Validate(
+                !input.IsRequired || value != null || Array.FindIndex(input.Or, l => vars.ContainsKey(l) && vars[l] != null) > -1,
+                string.Format("M32: {0}{2} is required, {1}", input.Letter, input.Name, input.Or.Length > 0 ? " or " + string.Join(" or ", input.Or) : "")
+            )){
+                return false;
+            }
+            if(!macro.Validate(!input.IsInteger || value == null ||  value.Value % 1 == 0, string.Format("M32: {0} must be an integer, {1}", input.Letter, input.Name))) {
+                return false;
+            }
+            if(!macro.Validate(
+                (input.MinValue == null || value == null || value.Value >= input.MinValue.Value) &&
+                (input.MaxValue == null || value == null || value.Value <= input.MaxValue.Value),
+                string.Format("M32: {0} is out of range, {1}", input.Letter, input.Name))) {
+                return false;
+            }
+
+            if(value != null){ inputs.Add(input.Letter, value.Value); }
+        }
+
+        return this.InternalExecute(macro, settings, inputs);
+    }
+
+    protected bool ProbeCycle(Macroclass macro, ProbeSettings settings, Axis axis, double probePositionWCS, out double strikePositionWCS) {
+        strikePositionWCS = default(double);
+
+        var currentPosition = axis == Axis.X ? macro.exec.GetXpos() :
+                                axis == Axis.Y ? macro.exec.GetYpos() :
+                                macro.exec.GetZpos();
+
+        var direction = probePositionWCS > currentPosition ? 1 : -1;
+
+        // two stage probe, fast then fine feed rate
+        for(var i=0; i<2; i++){
+            // first probe use fast feed, second use fine feed
+            var feedRate = i < 1 ? settings.FastFeedRate : settings.FineFeedRate;
+            // on first probe use position else use retract distance
+            var distance = i < 1 ? probePositionWCS - currentPosition : direction > 0 ? settings.Retract : -settings.Retract;
+
+            if(!macro.ExecuteGCode(
+                // start probing
+                string.Format("G91 F{0} G31 {1}{2}", feedRate, axis, distance)
+            )){
+                macro.exec.AddStatusmessage("M32: probe routine interrupted");
+                return false;
+            }
+
+            // check probe status outcome
+            var probeStatus = macro.exec.Getvar(5060);
+            if(probeStatus == 1){
+                macro.exec.AddStatusmessage("M32: probe routine failed to strike surface with-in travel");
+                return false;
+            }else if(probeStatus != 0){
+                macro.exec.AddStatusmessage(string.Format("M32: probe routine failed to strike surface (ERR{0})", probeStatus));
+                return false;
+            }
+
+            // on first probe use G90 retract distance otherwise restore original G90 position
+            distance = direction > 0 ? -settings.Retract : settings.Retract; // inverted to move away from strike
+            if(!macro.ExecuteGCode(
+                 string.Format("G{3} G0 {0}{1}", axis, i < 1 ? distance : probePositionWCS, i < 1 ? 91 : 90)
+            )){
+                macro.exec.AddStatusmessage("M32: probe routine interrupted");
+                return false;
+            }
+        }
+
+        strikePositionWCS = axis == Axis.X ? macro.exec.Getvar(5061) :
+                                axis == Axis.Y ? macro.exec.Getvar(5062) :
+                                macro.exec.Getvar(5063);
+
+        return true;
+    }
+}
+
+private class SurfaceProbeRoutine : ProbeRoutineBase {
+    public SurfaceProbeRoutine() : base() {
+        // Q, W, O added by ProbeRoutineBase
+        this.Inputs.AddRange(new []{
+            new ProbeInput('X', "Nominal axis position of surface", true, new []{'Y', 'Z'}),
+            new ProbeInput('Y', "Nominal axis position of surface", true, new []{'X', 'Z'}),
+            new ProbeInput('Z', "Nominal axis position of surface", true, new []{'X', 'Y'}),
+            new ProbeInput('N', "Position tolerance", false),
+            // new ProbeInput('H', "Tool offset number to update", false)
+        });
+    }
+
+    public override ProbeRoutine Routine {
+        get {
+            return ProbeRoutine.Surface;
+        }
+    }
+
+    public override string Help() {
+        return String.Join("\n", new []{
+            "P" + (int)this.Routine + " (Surface Probe)",
+            "X or Y or Z (Nominal axis position of surface)",
+            "Q (Probe overtravel threshold)",
+            "N (Position tolerance)",
+            "H (Tool offset number to update)",
+            "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
+            "O (Increment feature number [1], Increment component number and reset feature number [2])",
+            "#" + (int)ProbeOutputVar.XPosition + " (X-axis position)",
+            "#" + (int)ProbeOutputVar.YPosition + " (Y-axis position)",
+            "#" + (int)ProbeOutputVar.ZPosition + " (Z-axis position)",
+            "#" + (int)ProbeOutputVar.XError + " (X-axis error)",
+            "#" + (int)ProbeOutputVar.YError + " (Y-axis error)",
+            "#" + (int)ProbeOutputVar.ZError + " (Z-axis error)",
+            "#" + (int)ProbeOutputVar.PositionError + " (Position error)"
+        });
+    }
+
+    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+        var axisLabel = inputs.ContainsKey('X') ? 'X' : inputs.ContainsKey('Y') ? 'Y' : 'Z';
+        var axis = (Axis)Enum.Parse(typeof(Axis), axisLabel.ToString());
+        var positionNominalWCS = inputs[axisLabel];
+        
+        var overtravel = inputs['Q'];
+        var positionTolerance = inputs.ContainsKey('N') ? (double?)inputs['N'] : null;
+        var workOffsetIndex = inputs.ContainsKey('W') ? (int?)inputs['W'] : null;
+
+        double positionStrikeWSC;
+        if(!this.ProbeCycle(macro, settings, axis, positionNominalWCS, out positionStrikeWSC)){
+            return false;
+        }
+
+        var positionError = positionNominalWCS - positionStrikeWSC;
+
+        macro.exec.Setvar(axis == Axis.X ? positionStrikeWSC : 0D, (int)ProbeOutputVar.XPosition);
+        macro.exec.Setvar(axis == Axis.Y ? positionStrikeWSC : 0D, (int)ProbeOutputVar.YPosition);
+        macro.exec.Setvar(axis == Axis.Z ? positionStrikeWSC : 0D, (int)ProbeOutputVar.ZPosition);
+        macro.exec.Setvar(axis == Axis.X ? positionError : 0D, (int)ProbeOutputVar.XError);
+        macro.exec.Setvar(axis == Axis.Y ? positionError : 0D, (int)ProbeOutputVar.YError);
+        macro.exec.Setvar(axis == Axis.Z ? positionError : 0D, (int)ProbeOutputVar.ZError);
+        macro.exec.Setvar(positionError, (int)ProbeOutputVar.PositionError);
+
+        if(positionTolerance != null){
+            if(positionError > positionTolerance){
+                exec.AddStatusmessage("M32: " + axisLabel + " position error is out of tolerance: " + exec.FormatD(positionError) + ">" + exec.FormatD(positionTolerance));
+                return false;
+            }else{
+                exec.AddStatusmessage("M32: " + axisLabel + " position error is with-in tolerance: " + exec.FormatD(positionError) + "<=" + exec.FormatD(positionTolerance));
+            }
+        }
+
+        if(workOffsetIndex != null){
+            // calulcate position in machine cordinates
+            var scaleWCS = axis == Axis.X ? macro.exec.GetXscale() : axis == Axis.Y ? macro.exec.GetYscale() : macro.exec.GetZscale();
+            var positionMach = (positionStrikeWSC * scaleWCS) + (exec.GetZmachpos() - (exec.GetZpos() * scaleWCS));
+            // update WCS with position offset
+            if(!macro.ExecuteGCode(string.Format("G10 L2 P{0} {1}{2}", workOffsetIndex.Value, axisLabel, positionMach))){
+                return false;
+            }
+        }
+
+        return false;
+    }
+}
+
+private class PocketWallProbeRoutine : ProbeRoutineBase {
+    public override ProbeRoutine Routine {
+        get {
+            return ProbeRoutine.PocketOrWall;
+        }
+    }
+
+    public override string Help() {
+        return String.Join("\n", new []{
+            "P" + (int)this.Routine + " (Pocket/Wall Probe)",
+            "Z (Z-axis position of measurement with web feature)",
+            "X or Y (Nominal axis measurement [size] of feature)",
+            "Q (Probe overtravel threshold)",
+            "R (Retract clearance of feature surfaces)",
+            "N (Position tolerance)",
+            "E (Measurement [size] tolerance)",
+            "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
+            "O (Increment feature number [1], Increment component number and reset feature number [2])",
+            "#" + (int)ProbeOutputVar.XPosition + " (X-axis position)",
+            "#" + (int)ProbeOutputVar.YPosition + " (Y-axis position)",
+            "#" + (int)ProbeOutputVar.XError + " (X-axis error)",
+            "#" + (int)ProbeOutputVar.YError + " (Y-axis error)",
+            "#" + (int)ProbeOutputVar.Measure + " (Measured size)",
+            "#" + (int)ProbeOutputVar.MeasureError + " (Size error)",
+            "#" + (int)ProbeOutputVar.PositionError + " (Position error)"
+        });
+    }
+
+    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+        macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
+        return false;
+    }
+}
+
+private class BoreBossProbeRoutine : ProbeRoutineBase {
+    public override ProbeRoutine Routine {
+        get {
+            return ProbeRoutine.BoreOrBoss;
+        }
+    }
+
+    public override string Help() {
+        return String.Join("\n", new []{
+            "P" + (int)this.Routine + " (Bore/Boss Probe)",
+            "Z (Z-axis position of measurement with boss feature)",
+            "D (Nominal measurement [size] of feature)",
+            "Q (Probe overtravel threshold)",
+            "R (Retract clearance of feature surfaces)",
+            "N (Position tolerance)",
+            "E (Measurement [size] tolerance)",
+            "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
+            "O (Increment feature number [1], Increment component number and reset feature number [2])",
+            "#" + (int)ProbeOutputVar.XPosition + " (X-axis position)",
+            "#" + (int)ProbeOutputVar.YPosition + " (Y-axis position)",
+            "#" + (int)ProbeOutputVar.XError + " (X-axis error)",
+            "#" + (int)ProbeOutputVar.YError + " (Y-axis error)",
+            "#" + (int)ProbeOutputVar.Measure + " (Measured size)",
+            "#" + (int)ProbeOutputVar.MeasureError + " (Size error)",
+            "#" + (int)ProbeOutputVar.PositionError + " (Position error)"
+        });
+    }
+
+    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+        macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
+        return false;
+    }
+}
+
+private class BoreBoss3PointProbeRoutine : ProbeRoutineBase {
+    public override ProbeRoutine Routine {
+        get {
+            return ProbeRoutine.BoreOrBoss3Point;
+        }
+    }
+
+    public override string Help() {
+        return String.Join("\n", new []{
+            "P" + (int)this.Routine + " (Bore/Boss 3-Point Probe)",
+            "Z (Z-axis position of measurement with boss feature)",
+            "A (1st angle of measurement vector)",
+            "B (2nd angle of measurement vector)",
+            "C (3rd angle of measurement vector)",
+            "D (Nominal measurement [size] of feature)",
+            "Q (Probe overtravel threshold)",
+            "R (Retract clearance of feature surfaces)",
+            "N (Position tolerance)",
+            "E (Measurement [size] tolerance)",
+            "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
+            "O (Increment feature number [1] or Increment component number and reset feature number [2])",
+            "#" + (int)ProbeOutputVar.XPosition + " (X-axis position)",
+            "#" + (int)ProbeOutputVar.YPosition + " (Y-axis position)",
+            "#" + (int)ProbeOutputVar.XError + " (X-axis error)",
+            "#" + (int)ProbeOutputVar.YError + " (Y-axis error)",
+            "#" + (int)ProbeOutputVar.Measure + " (Measured size)",
+            "#" + (int)ProbeOutputVar.MeasureError + " (Size error)",
+            "#" + (int)ProbeOutputVar.PositionError + " (Position error)"
+        });
+    }
+
+    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+        macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
+        return false;
+    }
+}
+
+private class InternalCornerProbeRoutine : ProbeRoutineBase {
+    public override ProbeRoutine Routine {
+        get {
+            return ProbeRoutine.InternalCorner;
+        }
+    }
+
+    public override string Help() {
+        return String.Join("\n", new []{
+            "P" + (int)this.Routine + " (Internal Corner Probe)",
+            "X (Nominal X-axis position of corner)",
+            "Y (Nominal Y-axis position of corner)",
+            "I (Relative distance to secondary X-axis probe)",
+            "J (Relative distance to secondary Y-axis probe)",
+            "Q (Probe overtravel threshold)",
+            "N (Position tolerance)",
+            "B (Angle tolerance)",
+            "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
+            "O (Increment feature number [1], Increment component number and reset feature number [2])",
+            "#" + (int)ProbeOutputVar.XPosition + " (X-axis position)",
+            "#" + (int)ProbeOutputVar.YPosition + " (Y-axis position)",
+            "#" + (int)ProbeOutputVar.XError + " (X-axis error)",
+            "#" + (int)ProbeOutputVar.YError + " (Y-axis error)",
+            "#" + (int)ProbeOutputVar.XAngle + " (Measured +X-axis angle)",
+            "#" + (int)ProbeOutputVar.XAngleError + " (+X-axis angle error)",
+            "#" + (int)ProbeOutputVar.YAngle + " (Measured +Y-axis angle)",
+            "#" + (int)ProbeOutputVar.YAngleError + " (+Y-axis angle error)",
+            "#" + (int)ProbeOutputVar.Measure + " (Measured difference)",
+            "#" + (int)ProbeOutputVar.PositionError + " (Position error)"
+        });
+    }
+
+    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+        macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
+        return false;
+    }
+}
+
+private class ExternalCornerProbeRoutine : ProbeRoutineBase {
+    public override ProbeRoutine Routine {
+        get {
+            return ProbeRoutine.ExternalCorner;
+        }
+    }
+
+    public override string Help() {
+        return String.Join("\n", new []{
+            "P" + (int)this.Routine + " (External Corner Probe)",
+            "X (Nominal X-axis position of corner)",
+            "Y (Nominal Y-axis position of corner)",
+            "I (Relative distance to secondary X-axis probe)",
+            "J (Relative distance to secondary Y-axis probe)",
+            "Q (Probe overtravel threshold)",
+            "N (Position tolerance)",
+            "B (Angle tolerance)",
+            "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
+            "O (Increment feature number [1], Increment component number and reset feature number [2])",
+            "#" + (int)ProbeOutputVar.XPosition + " (X-axis position)",
+            "#" + (int)ProbeOutputVar.YPosition + " (Y-axis position)",
+            "#" + (int)ProbeOutputVar.XError + " (X-axis error)",
+            "#" + (int)ProbeOutputVar.YError + " (Y-axis error)",
+            "#" + (int)ProbeOutputVar.XAngle + " (Measured +X-axis angle)",
+            "#" + (int)ProbeOutputVar.XAngleError + " (+X-axis angle error)",
+            "#" + (int)ProbeOutputVar.YAngle + " (Measured +Y-axis angle)",
+            "#" + (int)ProbeOutputVar.YAngleError + " (+Y-axis angle error)",
+            "#" + (int)ProbeOutputVar.Measure + " (Measured difference)",
+            "#" + (int)ProbeOutputVar.PositionError + " (Position error)"
+        });
+    }
+
+    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+        macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
+        return false;
+    }
+}
+
+private class SurfaceAngleProbeRoutine : ProbeRoutineBase {
+    public override ProbeRoutine Routine {
+        get {
+            return ProbeRoutine.SurfaceAngle;
+        }
+    }
+
+    public override string Help() {
+        return String.Join("\n", new []{
+            "P" + (int)this.Routine + " (Surface Angle Probe)",
+            "X or Y (Mid-point axis position of surface)",
+            "D (Axis measured distance between probe positions)",
+            "Q (Probe overtravel threshold)",
+            "A (Nominal angle measurement)",
+            "B (Angle tolerance)",
+            "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
+            "O (Increment feature number [1], Increment component number and reset feature number [2])",
+            "#" + (int)ProbeOutputVar.XAngle + " (Measured +X-axis angle)",
+            "#" + (int)ProbeOutputVar.XAngleError + " (+X-axis angle error)",
+            "#" + (int)ProbeOutputVar.YAngle + " (Measured +Y-axis angle)",
+            "#" + (int)ProbeOutputVar.YAngleError + " (+Y-axis angle error)",
+            "#" + (int)ProbeOutputVar.Measure + " (Measured difference)"
+        });
+    }
+
+    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+        macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
+        return false;
+    }
+}
