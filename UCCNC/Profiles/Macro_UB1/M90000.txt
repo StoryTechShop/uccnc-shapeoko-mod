@@ -26,6 +26,10 @@ var LEDs = new []{
 
 // ### M90000 MACROLOOP ###
 
+if(exec.Ismacrorunning(90000) > 1){
+    return;
+}
+
 DateTime atcSealOnSince = DateTime.UtcNow;
 
 while(loop && !exec.Ismacrostopped()) {

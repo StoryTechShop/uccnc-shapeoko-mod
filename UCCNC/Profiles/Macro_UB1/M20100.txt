@@ -12,10 +12,8 @@ if(!exec.Ismacrostopped()) {
     } else {
         exec.Code("G49");
     }
-    while(exec.IsMoving()){
-        exec.Wait(25);
-    }
+    while(exec.IsMoving()){}
 }else{
-    exec.AddStatusmessage("M20100 interrupted");
+    exec.AddStatusmessage("SET Tn G43: Set tool number and offset interrupted");
     return;
 }

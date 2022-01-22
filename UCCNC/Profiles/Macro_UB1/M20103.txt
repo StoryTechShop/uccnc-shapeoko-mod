@@ -1,0 +1,19 @@
+﻿/**
+ * Macro: M20103 M6 G43
+ * Execute M6 tool change and apply G43 tool offset
+ * Screenset Button "M6 G43"
+ */
+
+if(exec.Ismacrorunning(20103) > 1){
+    return;
+}
+
+while(exec.IsMoving()){}
+
+if(!exec.Ismacrostopped()){
+    exec.Code("M6");
+    while(exec.IsMoving() && exec.Ismacrorunning(6) > 0){}
+
+    exec.Code("G43 H" + exec.Getcurrenttool());
+    while(exec.IsMoving()){}
+}

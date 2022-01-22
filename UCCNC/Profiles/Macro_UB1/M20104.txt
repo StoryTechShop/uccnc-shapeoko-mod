@@ -1,0 +1,15 @@
+﻿/**
+ * Macro: M20104 TOOL PROBE
+ * Execute M31 tool probe
+ * Screenset Button "TOOL PROBE"
+ */
+
+if(exec.Ismacrorunning(20104) > 1){
+    return;
+}
+
+while(exec.IsMoving()){}
+
+exec.Code("M31");
+
+while(exec.IsMoving() && exec.Ismacrorunning(31) > 0){}

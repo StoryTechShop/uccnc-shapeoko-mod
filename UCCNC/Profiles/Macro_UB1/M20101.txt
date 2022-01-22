@@ -40,7 +40,11 @@ var buttonCancel = 130;
 
 // ### MACRO ###
 
-// If machine was not homed then it is unsafe to move in machine coordinates, stop here...
+if(exec.Ismacrorunning(20101) > 1){
+    return;
+}
+
+ // check if machine is homed/referenced
 if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
 {
     exec.Stop();
@@ -144,9 +148,8 @@ if(!exec.Ismacrostopped()) {
     AS3.Setfield(0, 2652); // Field: Changetool
     AS3.Validatefield(2652);
 
-    exec.Code("G49");
-    while(exec.IsMoving()){
-        exec.Wait(25);
+    if(!ExecuteGCode("G49")){
+        exec.AddStatusmessage("REMOVE Tn G49: tool unload interrupted");
     }
 }else{
     exec.AddStatusmessage("REMOVE Tn G49: tool unload interrupted");
@@ -156,11 +159,18 @@ if(!exec.Ismacrostopped()) {
 #Events
 // ### GLOBAL UTILS ###
 
-private bool ExecuteGCode(params string[] code) {
-    exec.Codelist(new List<string>(code));
+private bool ExecuteGCode(params string[] lines) {
+    if(exec.Ismacrostopped() || exec.GetLED(25)){
+        return false;
+    }
+
+    var gcode = new List<string>(lines);
+    // gcode.ForEach(line =>  exec.AddStatusmessage(line));
+    exec.Codelist(gcode);
     while(exec.IsMoving()){}
 
-    return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    var result = !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    return result;
 }
 
 private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
@@ -171,36 +181,36 @@ private DialogResult Prompt(string title, string messsage, string button, bool w
 private void ATCOpen(PortPin outputRelease, PortPin? outputClamp, PortPin outputAir, int airOffDelayMS = 0) {
     if(outputClamp != null){
         exec.Clroutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
-        exec.Wait(250);
+        Thread.Sleep(250);
     }
 
     exec.Setoutpin(outputRelease.Port, outputRelease.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     exec.Setoutpin(outputAir.Port, outputAir.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     if(airOffDelayMS > 0){
         // turn air off after delay
-        exec.Wait(airOffDelayMS);
+        Thread.Sleep(airOffDelayMS);
         exec.Clroutpin(outputAir.Port, outputAir.Pin);
     }
 }
 
 private void ATCClose(PortPin outputRelease, PortPin? outputClamp, PortPin outputAir, int clampOffDelayMS = 0) {
     exec.Clroutpin(outputAir.Port, outputAir.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     exec.Clroutpin(outputRelease.Port, outputRelease.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     if(outputClamp != null){
         exec.Setoutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
-        exec.Wait(250);
+        Thread.Sleep(250);
 
         if(clampOffDelayMS > 0){
             // turn tool clamp off after delay
-            exec.Wait(clampOffDelayMS);
+            Thread.Sleep(clampOffDelayMS);
             exec.Clroutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
         }
     }
@@ -213,7 +223,7 @@ private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLe
 
     do{
         // dwell after first
-        if(debounce < 2 || retry < 4){ exec.Wait(250); }
+        if(debounce < 2 || retry < 4){ Thread.Sleep(250); }
 
         var clampState = exec.GetLED(clampLed);
         var releaseState = exec.GetLED(releaseLed);

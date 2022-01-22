@@ -3,11 +3,10 @@
  * UCCNC v1.2115 or higher required, with Messages plugin enabled
  * 
  * Unload current tool to load new tool
- * M6 [En]
- * - E: 1 = disable moving back to original XY position (optional, defaults to true)
+ * M6
  * 
  * Unloading Current Tool:
- *  If tool has "Probe" or "NoStore" tag in tool type field, will prompt for manually unloading tool
+ *  If tool has "NoStore" tag in tool type field, will prompt for manually unloading tool
  *  If current tool has no slot assigned, it is assigned next empty slot (profileAutoAssignToolSlot=true)
  *  If no empty slots are available, will prompt for manually unloading tool
  * 
@@ -50,6 +49,11 @@ var profileToolTableSlotSection = profileAutoAssignToolSlot ? "M6ToolTable" : "T
 var restoreXYPosition = false;
 // should apply G43 tool offset after successful tool change
 var applyToolOffset = false;
+
+// macro to use for tool offset probe
+var toolOffsetProbeMacro = "M31";
+// should run tool offset probe macro after a successful tool change
+var toolOffsetProbeAfterToolChange = false;
 
 // safe Z position for travel
 double zSafe = 0.0D;
@@ -104,6 +108,9 @@ var toolManualPosition = new Position(-9.0D, -18.0D);
 // enable prompts to engage tool release and clamp
 var toolManualATCPrompts = false;
 
+// enable prompt for tool offset probe after manaul tool change
+var toolManualToolOffsetProbePrompt = false;
+
 // OUTPUT to engage tool release
 var atcOutputToolRelease = new PortPin(3, 1);
 // OUTPUT to engage tool clamp - optional, if null it expects atcOutputToolRelease off will cause tool clamp
@@ -131,7 +138,7 @@ var buttonCancel = 130;
 var toolCurrentNumber = exec.Getcurrenttool();
 var toolNewNumber = exec.Getnewtool();
 
-// If machine was not homed then it is unsafe to move in machine coordinates, stop here...
+ // check if machine is homed/referenced
 if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
 {
     exec.Callbutton(buttonInterrupt);
@@ -190,8 +197,8 @@ if(toolNewSlot >= toolSlots.Length){
 
 // read and parse tool flags
 var toolCurrentTypeFlags = exec.Readkey("Tooltablevalues", "Type"+toolCurrentNumber, "").Split(new char[]{' ', ',', ';'});
-var toolCurrentStorable = !Array.Exists(toolCurrentTypeFlags, f => string.Equals(f, "Probe", StringComparison.InvariantCultureIgnoreCase) ||
-                                                                    string.Equals(f, "NoStore", StringComparison.InvariantCultureIgnoreCase));
+var toolCurrentStorable = !Array.Exists(toolCurrentTypeFlags, f => string.Equals(f, "NoStore", StringComparison.InvariantCultureIgnoreCase));
+
 // create function for manual tool changes
 QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, int toolNumber, string toolDesc, bool skipClamp) => {
     exec.AddStatusmessage("M6: " + status);
@@ -216,13 +223,24 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
     }
 
     if(!toolManualATCPrompts){
-        result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to continue\n" + toolDesc, "OKCancel");
-        if(result != DialogResult.OK){
+        
+        if(!toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
+            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to continue\n" + toolDesc, "OKCancel");
+        }else{
+            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press Yes to measure tool offset, No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
+        }
+
+        if(result == DialogResult.Yes){
+            // force tool offset probe
+            toolOffsetProbeAfterToolChange = true;
+        }else if(result != DialogResult.OK){
             exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
             exec.Callbutton(buttonCancel);
             return false;
         }
+
     }else{
+
         // check if in tool release position
         if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, true)){
             result = Prompt("M6: Manual Tool Change", (action == ToolChangeAction.Load ?
@@ -249,13 +267,22 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
                 return false;
             }
 
-            result = Prompt("M6: Manual Tool Change", "Press OK to continue", "OKCancel");
-            if(result != DialogResult.OK){
+            if(!toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
+                result = Prompt("M6: Manual Tool Change", "Press OK to continue", "OKCancel");
+            }else{
+                result = Prompt("M6: Manual Tool Change", "Press Yes to measure tool offset for T" + toolNumber + ", No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
+            }
+
+            if(result == DialogResult.Yes){
+                // force tool offset probe
+                toolOffsetProbeAfterToolChange = true;
+            }else if(result != DialogResult.OK){
                 exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
                 exec.Callbutton(buttonCancel);
                 return false;
             }
         }
+
     }
 
     // move back to safe Z - just in case
@@ -414,7 +441,7 @@ if(toolNewIsManual){
 }else if (toolNewNumber > 0 ){
     // load/clamp tool via ATC
 
-    exec.AddStatusmessage("M6: loading T" + toolNewNumber + " from slot #" + toolNewSlot + " into spindle");
+    exec.AddStatusmessage("M6: loading T" + toolNewNumber + " from slot #" + toolNewSlot);
 
     var toolSlotPosition = toolSlots[toolNewSlot];
     var toolSlotOffsetPosition = new Position(toolSlotPosition.X + toolChangeSlotOffset.X, toolSlotPosition.Y + toolChangeSlotOffset.Y);
@@ -500,15 +527,22 @@ if(toolNewIsManual){
 // check if nothing is clamped in spindle
 if(toolNewNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
     exec.Callbutton(buttonInterrupt);
-    exec.AddStatusmessage("M6: spindle not empty or jammed drawbar");
-    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + "not in spindle or drawbar ajar", "OK", true);
-    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + "not in spindle or drawbar ajar\n" + toolNewDesc, "OK", true);
+    exec.AddStatusmessage("M6: T" + toolNewNumber + " not in spindle or drawbar ajar");
+    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + " not in spindle or drawbar ajar\n" + toolNewDesc, "OK", true);
     return;
 }
 
 if(!exec.Ismacrostopped()) {
     exec.Setcurrenttool(toolNewNumber);
     
+    if(toolNewNumber > 0 && toolOffsetProbeAfterToolChange){
+        exec.AddStatusmessage("M6: executing tool offset probe " + toolOffsetProbeMacro);
+        if(!ExecuteGCode(toolOffsetProbeMacro)){
+            exec.AddStatusmessage("M6: tool change interrupted");
+            return;
+        }
+    }
+
     if(!ExecuteGCode(
         // move to safe z
         "G00 G53 Z" + zSafe,
@@ -536,14 +570,21 @@ if(!exec.Ismacrostopped()) {
 // ### GLOBAL UTILS ###
 
 private bool ExecuteGCode(params string[] lines) {
+    if(exec.Ismacrostopped() || exec.GetLED(25)){
+        return false;
+    }
+
     var gcode = new List<string>(lines);
     // gcode.ForEach(line =>  exec.AddStatusmessage(line));
     exec.Codelist(gcode);
-    while(exec.IsMoving()){
-        exec.Wait(25);
-    }
+    while(exec.IsMoving()){}
 
-    return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    var result = !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    return result;
+}
+
+private string FormatD(double? num) {
+    return num != null ? String.Format("{0:0.0###}", num.Value) : "<null>";
 }
 
 private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
@@ -554,36 +595,36 @@ private DialogResult Prompt(string title, string messsage, string button, bool w
 private void ATCOpen(PortPin outputRelease, PortPin? outputClamp, PortPin outputAir, int airOffDelayMS = 0) {
     if(outputClamp != null){
         exec.Clroutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
-        exec.Wait(250);
+        Thread.Sleep(250);
     }
 
     exec.Setoutpin(outputRelease.Port, outputRelease.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     exec.Setoutpin(outputAir.Port, outputAir.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     if(airOffDelayMS > 0){
         // turn air off after delay
-        exec.Wait(airOffDelayMS);
+        Thread.Sleep(airOffDelayMS);
         exec.Clroutpin(outputAir.Port, outputAir.Pin);
     }
 }
 
 private void ATCClose(PortPin outputRelease, PortPin? outputClamp, PortPin outputAir, int clampOffDelayMS = 0) {
     exec.Clroutpin(outputAir.Port, outputAir.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     exec.Clroutpin(outputRelease.Port, outputRelease.Pin);
-    exec.Wait(250);
+    Thread.Sleep(250);
 
     if(outputClamp != null){
         exec.Setoutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
-        exec.Wait(250);
+        Thread.Sleep(250);
 
         if(clampOffDelayMS > 0){
             // turn tool clamp off after delay
-            exec.Wait(clampOffDelayMS);
+            Thread.Sleep(clampOffDelayMS);
             exec.Clroutpin(outputClamp.Value.Port, outputClamp.Value.Pin);
         }
     }
@@ -596,7 +637,7 @@ private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLe
 
     do{
         // dwell after first
-        if(debounce < 2 || retry < 4){ exec.Wait(250); }
+        if(debounce < 2 || retry < 4){ Thread.Sleep(250); }
 
         var clampState = exec.GetLED(clampLed);
         var releaseState = exec.GetLED(releaseLed);
@@ -607,6 +648,15 @@ private bool AssertClampPosition(int clampLed, bool clampExpected, int releaseLe
     }while(retry > 0 && debounce > 0 && !result);
 
     return result;
+}
+
+private double GetOffsetZ(int offsetNumber) {
+    var fieldStartIdxToolZ_1 = 195; // 196-215 - T1-20
+    var fieldStartIdxToolZ_2 = 900; // 921-996 - T21-96
+    var fieldStartIdxToolZ = offsetNumber < 21 ? fieldStartIdxToolZ_1 : fieldStartIdxToolZ_2;
+    var offsetCurrentZ = offsetNumber > 0 ? double.Parse(AS3.Getfield(fieldStartIdxToolZ+offsetNumber)) : 0.0D;
+
+    return offsetCurrentZ;
 }
 
 private enum ToolChangeAction {

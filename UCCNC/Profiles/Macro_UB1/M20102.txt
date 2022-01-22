@@ -1,13 +1,21 @@
 /**
  * Macro: M20102 Tool Offset Measure All in ATC
  * Measure each tool in ATC slots
- * Screenset Button "M31 ALL ATC"
+ * Screenset Button "M31 ATC"
  */
+
+// ### CONFIG ###
 
 // UCCNC has limitation in tool table API (http://forum.cncdrive.com/viewtopic.php?f=13&t=3537)
 // we are resorting to using a custom section for tool slot in the profile to prevent losing data
 // If M6 profileAutoAssignToolSlot is false, use UCCNC "Tooltablevalues" instead
 var profileToolTableSlotSection = "M6ToolTable"; // UCCNC: "Tooltablevalues"
+
+// ### MACRO ###
+
+if(exec.Ismacrorunning(20102) > 1){
+    return;
+}
 
 var gcode = new List<string>(new string[]{"G49"});
 
@@ -15,13 +23,13 @@ var gcode = new List<string>(new string[]{"G49"});
 for(var toolNum=1; toolNum<=96; toolNum++){
     var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+toolNum, "0"));
     if(slot > 0){
-        gcode.Add("T" + toolNum + " M6 E1 M31");
+        gcode.Add("T" + toolNum + " M6 M31");
     }
 }
 
 // check if any tools where added to measure
 if(gcode.Count < 2){
-    exec.AddStatusmessage("M31 ALL ATC: No tools to measure");
+    exec.AddStatusmessage("M31 ATC: No tools to measure");
     return;
 }
 
@@ -30,18 +38,23 @@ gcode.Add("T" + exec.Getcurrenttool() + " M6");
 gcode.Add(String.Join(" ", AS3.Getfield(877).Split('|')));
 
 if(!ExecuteGCode(gcode.ToArray())){
-    exec.AddStatusmessage("M31 ALL ATC: Tool change and offset interrupted");
+    exec.AddStatusmessage("M31 ATC: Tool change and offset interrupted");
     return;
 }
 
 #Events
 // ### GLOBAL UTILS ###
 
-private bool ExecuteGCode(params string[] code) {
-    exec.Codelist(new List<string>(code));
-    while(exec.IsMoving()){
-        exec.Wait(25);
+private bool ExecuteGCode(params string[] lines) {
+    if(exec.Ismacrostopped() || exec.GetLED(25)){
+        return false;
     }
 
-    return !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    var gcode = new List<string>(lines);
+    // gcode.ForEach(line =>  exec.AddStatusmessage(line));
+    exec.Codelist(gcode);
+    while(exec.IsMoving()){}
+
+    var result = !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
+    return result;
 }
