@@ -238,8 +238,11 @@ if(!exec.Ismacrostopped()){
         exec.Writekey("M31Macro", "MasterToolProbeZ", offsetProbeZ.ToString());
     }
 
+    var offsetTo = FormatD(offsetToolZ);
+    var offsetFrom = FormatD(offsetCurrentZ);
+    exec.AddStatusmessage("M31: Setting H" + offsetNumber + " tool offset" + (offsetTo != offsetFrom ? " from Z" + offsetFrom : "") + " to Z" + offsetTo);
+
     // update tool offset in tool table field
-    exec.AddStatusmessage("M31: Setting H" + offsetNumber + " tool offset to Z" + FormatD(offsetToolZ));
     AS3.Setfieldtext(offsetToolZ.ToString(), fieldStartIdxToolZ+offsetNumber);
     AS3.Validatefield(fieldStartIdxToolZ+offsetNumber);
 
