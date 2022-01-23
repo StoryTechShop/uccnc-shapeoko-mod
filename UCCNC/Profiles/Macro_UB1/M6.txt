@@ -233,7 +233,7 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
         if(result == DialogResult.Yes){
             // force tool offset probe
             toolOffsetProbeAfterToolChange = true;
-        }else if(result != DialogResult.OK){
+        }else if(result != DialogResult.OK && result != DialogResult.No){
             exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
             exec.Callbutton(buttonCancel);
             return false;
@@ -276,7 +276,7 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
             if(result == DialogResult.Yes){
                 // force tool offset probe
                 toolOffsetProbeAfterToolChange = true;
-            }else if(result != DialogResult.OK){
+            }else if(result != DialogResult.OK && result != DialogResult.No){
                 exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
                 exec.Callbutton(buttonCancel);
                 return false;
