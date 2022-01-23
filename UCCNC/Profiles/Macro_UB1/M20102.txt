@@ -23,7 +23,9 @@ var gcode = new List<string>(new string[]{"G49"});
 for(var toolNum=1; toolNum<=96; toolNum++){
     var slot = int.Parse(exec.Readkey(profileToolTableSlotSection, "Slot"+toolNum, "0"));
     if(slot > 0){
-        gcode.Add("T" + toolNum + " M6 M31");
+        gcode.Add("T" + toolNum + " M6");
+        gcode.Add("G43 H" + toolNum);
+        gcode.Add("M31 H" + toolNum);
     }
 }
 
@@ -33,9 +35,11 @@ if(gcode.Count < 2){
     return;
 }
 
-// add original tool and modal to restore
-gcode.Add("T" + exec.Getcurrenttool() + " M6");
+// restore modal and change back to original tool
 gcode.Add(String.Join(" ", AS3.Getfield(877).Split('|')));
+var currentTool = exec.Getcurrenttool();
+gcode.Add("T" + currentTool + " M6");
+gcode.Add("G43 H" + currentTool);
 
 if(!ExecuteGCode(gcode.ToArray())){
     exec.AddStatusmessage("M31 ATC: Tool change and offset interrupted");
@@ -51,7 +55,7 @@ private bool ExecuteGCode(params string[] lines) {
     }
 
     var gcode = new List<string>(lines);
-    // gcode.ForEach(line =>  exec.AddStatusmessage(line));
+    gcode.ForEach(line =>  exec.AddStatusmessage(line));
     exec.Codelist(gcode);
     while(exec.IsMoving()){}
 
