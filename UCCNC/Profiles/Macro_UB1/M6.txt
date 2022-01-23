@@ -428,6 +428,11 @@ if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease)){
 
 if(!exec.Ismacrostopped()) {
     exec.Setcurrenttool(0);
+    // reset tool offset
+    if(!ExecuteGCode("G49")){
+        exec.AddStatusmessage("M6: tool change interrupted");
+        return;
+    }
 }else{
     exec.AddStatusmessage("M6: tool change interrupted");
     return;
@@ -533,11 +538,19 @@ if(toolNewNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRe
 }
 
 if(!exec.Ismacrostopped()) {
+
     exec.Setcurrenttool(toolNewNumber);
+    // apply tool offset if enabled
+    if(applyToolOffset && !ExecuteGCode("G43 H" + toolNewNumber)){
+        exec.AddStatusmessage("M6: tool change interrupted");
+        return;
+    }
     
+    // execute tool offset probe if enabled
     if(toolNewNumber > 0 && toolOffsetProbeAfterToolChange){
-        exec.AddStatusmessage("M6: executing tool offset probe " + toolOffsetProbeMacro);
-        if(!ExecuteGCode(toolOffsetProbeMacro)){
+        var macro = toolOffsetProbeMacro + " H" + toolNewNumber;
+        exec.AddStatusmessage("M6: executing tool offset probe " + macro);
+        if(!ExecuteGCode(macro)){
             exec.AddStatusmessage("M6: tool change interrupted");
             return;
         }
@@ -548,8 +561,6 @@ if(!exec.Ismacrostopped()) {
         "G00 G53 Z" + zSafe,
         // move back to original XY position if enabled
         (restoreXYPosition ? "G00 G53 X" + originalPosition.X + " Y" + originalPosition.Y : ""),
-        // apply tool offset if enabled
-        (applyToolOffset ? "G43 H" + toolNewNumber : ""),
         // restore modal
         String.Join(" ", Array.FindAll(originalModal,
             // if applyToolOffset, filter out original G43/G49
