@@ -52,7 +52,7 @@ var applyToolOffset = false;
 
 // macro to use for tool offset probe
 var toolOffsetProbeMacro = "M31";
-// should run tool offset probe macro after a successful tool change
+// should ALWAYS run tool offset probe macro after a successful tool change
 var toolOffsetProbeAfterToolChange = false;
 
 // safe Z position for travel
@@ -109,7 +109,7 @@ var toolManualPosition = new Position(-9.0D, -18.0D);
 var toolManualATCPrompts = false;
 
 // enable prompt for tool offset probe after manaul tool change
-var toolManualToolOffsetProbePrompt = false;
+var toolManualToolOffsetProbePrompt = true;
 
 // OUTPUT to engage tool release
 var atcOutputToolRelease = new PortPin(3, 1);
@@ -142,14 +142,14 @@ var toolNewNumber = exec.Getnewtool();
 if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
 {
     exec.Callbutton(buttonInterrupt);
-    Prompt("M6: Tool Change Failed", "Machine is not homed", "OK", true);
+    Prompt("M6: Tool Change Failed", "Machine is not homed", "OK", PromptStatus.Error);
     return;
 }
 
 // Check if there is a tool in the spindle
 if(toolCurrentNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
     exec.Callbutton(buttonInterrupt);
-    Prompt("M6: Tool Change Failed", "Tool not in spindle", "OK", true);
+    Prompt("M6: Tool Change Failed", "Tool not in spindle", "OK", PromptStatus.Error);
     return;
 }
 
@@ -186,12 +186,12 @@ var toolNewIsManual = (toolNewNumber > 0 && toolNewSlot < 1);
 // check that tool slot not out of range
 if(toolCurrentSlot >= toolSlots.Length){
     exec.Callbutton(buttonInterrupt);
-    Prompt("M6: Tool Change Failed", "T" + toolCurrentNumber + " slot #" + toolCurrentSlot + " out of range", "OK", true);
+    Prompt("M6: Tool Change Failed", "T" + toolCurrentNumber + " slot #" + toolCurrentSlot + " out of range", "OK", PromptStatus.Error);
     return;
 }
 if(toolNewSlot >= toolSlots.Length){
     exec.Callbutton(buttonInterrupt);
-    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + " slot #" + toolNewSlot + " out of range", "OK", true);
+    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + " slot #" + toolNewSlot + " out of range", "OK", PromptStatus.Error);
     return;
 }
 
@@ -209,7 +209,7 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
     var distanceY = Math.Abs(exec.GetYmachpos() - toolManualPosition.Y);
     // check if not at manual tool position
     if(distanceX > 0.0001D || distanceY > 0.0001D){
-        result = Prompt("M6: Manual Tool Change", "Move to position for manual " + action.ToString().ToLower() + " of T" + toolNumber + "?\n" + toolDesc, "YesNoCancel", true);
+        result = Prompt("M6: Manual Tool Change", "Move to position for manual " + action.ToString().ToLower() + " of T" + toolNumber + "?\n" + toolDesc, "YesNoCancel", PromptStatus.Warning);
         if(result == DialogResult.Yes){
             if(!ExecuteGCode("G00 G53 X" + toolManualPosition.X + " Y" + toolManualPosition.Y)){
                 exec.AddStatusmessage("M6: tool change interrupted");
@@ -224,10 +224,10 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
 
     if(!toolManualATCPrompts){
         
-        if(!toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
-            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to continue\n" + toolDesc, "OKCancel");
+        if(action == ToolChangeAction.Unload || !toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
+            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to continue\n" + toolDesc, "OKCancel", PromptStatus.Warning);
         }else{
-            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press Yes to measure tool offset, No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
+            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press Yes to measure tool offset, No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel", PromptStatus.Warning);
         }
 
         if(result == DialogResult.Yes){
@@ -246,7 +246,8 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
             result = Prompt("M6: Manual Tool Change", (action == ToolChangeAction.Load ?
                 "Press OK to open tool clamp" :
                 "Secure T" + toolNumber + " and press OK to release tool") +
-                "\n" + (action == ToolChangeAction.Load ? "" : toolDesc), "OKCancel"
+                "\n" + (action == ToolChangeAction.Load ? "" : toolDesc), "OKCancel",
+                action == ToolChangeAction.Unload ? PromptStatus.Warning : PromptStatus.None // warning for unload - tool drop!
             );
             if(result != DialogResult.OK){
                 exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
@@ -258,7 +259,10 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
 
         // check if skip reclamp - manual tool change back to back
         if(!skipClamp){
-            result = Prompt("M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to " + (action == ToolChangeAction.Load ? "clamp tool" : "continue") + "\n" + toolDesc, "OKCancel");
+            result = Prompt(
+                "M6: Manual Tool Change", action + " T" + toolNumber + " and press OK to " + (action == ToolChangeAction.Load ? "clamp tool" : "continue") + "\n" + toolDesc, "OKCancel",
+                action == ToolChangeAction.Unload ? PromptStatus.Warning : PromptStatus.None // warning for unload as motion will happen after
+            );
             ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
 
             if(result != DialogResult.OK){
@@ -267,19 +271,21 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
                 return false;
             }
 
-            if(!toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
-                result = Prompt("M6: Manual Tool Change", "Press OK to continue", "OKCancel");
-            }else{
-                result = Prompt("M6: Manual Tool Change", "Press Yes to measure tool offset for T" + toolNumber + ", No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel");
-            }
+            if(action == ToolChangeAction.Load){
+                if(!toolManualToolOffsetProbePrompt || toolOffsetProbeAfterToolChange){
+                    result = Prompt("M6: Manual Tool Change", "Press OK to continue", "OKCancel", PromptStatus.Warning); // warning for motion after
+                }else{
+                    result = Prompt("M6: Manual Tool Change", "Press Yes to measure tool offset for T" + toolNumber + ", No to continue\nCurrent offset Z"+ FormatD(GetOffsetZ(toolNumber)) + "\n" + toolDesc, "YesNoCancel", PromptStatus.Warning);
+                }
 
-            if(result == DialogResult.Yes){
-                // force tool offset probe
-                toolOffsetProbeAfterToolChange = true;
-            }else if(result != DialogResult.OK && result != DialogResult.No){
-                exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
-                exec.Callbutton(buttonCancel);
-                return false;
+                if(result == DialogResult.Yes){
+                    // force tool offset probe
+                    toolOffsetProbeAfterToolChange = true;
+                }else if(result != DialogResult.OK && result != DialogResult.No){
+                    exec.AddStatusmessage("M6: Manual tool change for T" + toolNumber + " was canceled");
+                    exec.Callbutton(buttonCancel);
+                    return false;
+                }
             }
         }
 
@@ -317,7 +323,7 @@ if(toolCurrentNumber > 0){
             
             // find an empty slot #
             var emptySlot = 0;
-            for(var i=1; i<=toolSlots.Length; i++){
+            for(var i=1; i<toolSlots.Length; i++){
                 if(!usedSlots.Contains(i)){
                     emptySlot = i;
                     break;
@@ -383,7 +389,7 @@ if(toolCurrentNumber > 0){
 
                 exec.Callbutton(buttonInterrupt);
                 exec.AddStatusmessage("M6: failed to eject T" + toolCurrentNumber);
-                Prompt("M6: Tool Change Failed", "Failed to eject T" + toolCurrentNumber + "\n" + toolNewDesc, "OK", true);
+                Prompt("M6: Tool Change Failed", "Failed to eject T" + toolCurrentNumber + "\n" + toolNewDesc, "OK", PromptStatus.Error);
                 return;
             }
 
@@ -401,7 +407,7 @@ if(toolCurrentNumber > 0){
             if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease, false)){
                 exec.Callbutton(buttonInterrupt);
                 exec.AddStatusmessage("M6: failed to eject T" + toolCurrentNumber + " or close drawbar");
-                Prompt("M6: Tool Change Failed", "Failed to eject tool or close drawbar", "OK", true);
+                Prompt("M6: Tool Change Failed", "Failed to eject tool or close drawbar", "OK", PromptStatus.Error);
                 return;
             }
 
@@ -422,7 +428,7 @@ if(toolCurrentNumber > 0){
 if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease)){
     exec.Callbutton(buttonInterrupt);
     exec.AddStatusmessage("M6: spindle not empty or drawbar ajar");
-    Prompt("M6: Tool Change Failed", "Spindle not empty or drawbar ajar", "OK", true);
+    Prompt("M6: Tool Change Failed", "Spindle not empty or drawbar ajar", "OK", PromptStatus.Error);
     return;
 }
 
@@ -473,7 +479,7 @@ if(toolNewIsManual){
         ATCClose(atcOutputToolRelease, atcOutputToolClamp, atcOutputPurge, atcToolClampOffDelayMS);
         exec.Callbutton(buttonInterrupt);
         exec.AddStatusmessage("M6: failed to open drawbar for T" + toolNewNumber);
-        Prompt("M6: Tool Change Failed", "Failed to open drawbar for T" + toolNewNumber + "\n" + toolNewDesc, "OK", true);
+        Prompt("M6: Tool Change Failed", "Failed to open drawbar for T" + toolNewNumber + "\n" + toolNewDesc, "OK", PromptStatus.Error);
         return;
     }
 
@@ -484,7 +490,7 @@ if(toolNewIsManual){
     )){
         exec.AddStatusmessage("M6: tool change interrupted");
         // Movement was interrupted, so might not be safe to close automatically
-        Prompt("M6: Tool Change Interrupted", "Manual closure of ATC is required", "OK", true);
+        Prompt("M6: Tool Change Interrupted", "Manual closure of ATC is required", "OK", PromptStatus.Error);
         return;
     }
 
@@ -495,7 +501,7 @@ if(toolNewIsManual){
     if(!AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
         exec.Callbutton(buttonInterrupt);
         exec.AddStatusmessage("M6: failed to close drawbar and clamp T" + toolNewNumber);
-        Prompt("M6: Tool Change Failed", "Failed to close drawbar and clamp T" + toolNewNumber + "\n" + toolNewDesc, "OK", true);
+        Prompt("M6: Tool Change Failed", "Failed to close drawbar and clamp T" + toolNewNumber + "\n" + toolNewDesc, "OK", PromptStatus.Error);
         return;
     }
 
@@ -514,7 +520,7 @@ if(toolNewIsManual){
     if(!AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
         exec.Callbutton(buttonInterrupt);
         exec.AddStatusmessage("M6: failed to close drawbar and clamp T" + toolNewNumber);
-        Prompt("M6: Tool Change Failed", "Failed to close drawbar and clamp T" + toolNewNumber + "\n" + toolNewDesc, "OK", true);
+        Prompt("M6: Tool Change Failed", "Failed to close drawbar and clamp T" + toolNewNumber + "\n" + toolNewDesc, "OK", PromptStatus.Error);
         return;
     }
 
@@ -533,7 +539,7 @@ if(toolNewIsManual){
 if(toolNewNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
     exec.Callbutton(buttonInterrupt);
     exec.AddStatusmessage("M6: T" + toolNewNumber + " not in spindle or drawbar ajar");
-    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + " not in spindle or drawbar ajar\n" + toolNewDesc, "OK", true);
+    Prompt("M6: Tool Change Failed", "T" + toolNewNumber + " not in spindle or drawbar ajar\n" + toolNewDesc, "OK", PromptStatus.Error);
     return;
 }
 
@@ -598,8 +604,12 @@ private string FormatD(double? num) {
     return num != null ? String.Format("{0:0.0###}", num.Value) : "<null>";
 }
 
-private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
-    var result = exec.Informplugin("Messages.dll", string.Format("{0}{1}:{2}|{3}", warning ? "!" : "", button, title, messsage));
+private DialogResult Prompt(string title, string messsage, string button, PromptStatus status = PromptStatus.None) {
+    var result = exec.Informplugin("Messages.dll",
+    string.Format("{0}{1}:{2}|{3}",
+        status == PromptStatus.Error ? "#" : status == PromptStatus.Warning ? "!" : "",
+        button, title, messsage
+    ));
     return result is DialogResult ? (DialogResult)result : DialogResult.None;
 }
 
@@ -668,6 +678,12 @@ private double GetOffsetZ(int offsetNumber) {
     var offsetCurrentZ = offsetNumber > 0 ? double.Parse(AS3.Getfield(fieldStartIdxToolZ+offsetNumber)) : 0.0D;
 
     return offsetCurrentZ;
+}
+
+private enum PromptStatus {
+    Error = -1,
+    None = 0,
+    Warning = 1
 }
 
 private enum ToolChangeAction {
