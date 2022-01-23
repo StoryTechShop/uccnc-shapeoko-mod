@@ -93,9 +93,14 @@ public double Distance(double a, double b) {
     return Math.Abs(distance);
 }
 
+public double Distance(double x1, double x2, double y1, double y2) {
+    var distance = Math.Sqrt(Math.Pow((x2 - x1), 2) + Math.Pow((y2 - y1), 2));
+    return distance;
+}
+
 public enum ProbeRoutine {
     Surface = 1,
-    PocketOrWall = 2,
+    PocketOrWeb = 2,
     BoreOrBoss = 3,
     BoreOrBoss3Point = 4,
     InternalCorner = 5,
@@ -204,7 +209,7 @@ public abstract class ProbeRoutineBase {
 
     abstract public ProbeRoutine Routine { get; }
     abstract public string Help();
-    abstract protected bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs);
+    abstract internal bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs);
 
     protected List<ProbeInput> Inputs { get; private set; }
 
@@ -250,7 +255,15 @@ public abstract class ProbeRoutineBase {
         while(macro.exec.IsMoving()){};
         */
 
-        return this.InternalExecute(macro, settings, inputs);
+        Dictionary<ProbeOutputNum, double> outputs;
+        var result = this.InternalExecute(macro, settings, inputs, out outputs);
+
+        foreach (var output in outputs) {
+            macro.exec.Setvar(output.Value, (int)output.Key);
+        }
+        while(macro.exec.IsMoving()){}
+
+        return result;
     }
 
     protected bool AssertTolerance(Macroclass macro, string label, double? tolerance, double? error) {
@@ -394,7 +407,9 @@ public class SurfaceProbeRoutine : ProbeRoutineBase {
         });
     }
 
-    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+    internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
+        outputs = new Dictionary<ProbeOutputNum, double>();
+        
         var axisLabel = inputs.ContainsKey('X') ? 'X' : inputs.ContainsKey('Y') ? 'Y' : 'Z';
         var axis = (Axis)Enum.Parse(typeof(Axis), axisLabel.ToString());
         var positionNominalWCS = inputs[axisLabel];
@@ -403,30 +418,30 @@ public class SurfaceProbeRoutine : ProbeRoutineBase {
         var positionTolerance = inputs.ContainsKey('N') ? (double?)inputs['N'] : null;
         var wcsIndex = inputs.ContainsKey('W') ? (int?)inputs['W'] : null;
 
-        double positionStrikeWSC;
-        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominalWCS, out positionStrikeWSC)){
+        double positionStrikeWCS;
+        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominalWCS, out positionStrikeWCS)){
             return false;
         }
 
-        var positionError = macro.Distance(positionNominalWCS, positionStrikeWSC);
-        macro.exec.AddStatusmessage("POS: " + positionNominalWCS + " STK:" + positionStrikeWSC + " ERR:" + positionError);
+        var positionError = positionNominalWCS - positionStrikeWCS;
+        macro.exec.AddStatusmessage("POS: " + positionNominalWCS + " STK:" + positionStrikeWCS + " ERR:" + positionError);
 
-        macro.exec.Setvar(axis == Axis.X ? positionStrikeWSC : 0D, (int)ProbeOutputNum.XPosition);
-        macro.exec.Setvar(axis == Axis.Y ? positionStrikeWSC : 0D, (int)ProbeOutputNum.YPosition);
-        macro.exec.Setvar(axis == Axis.Z ? positionStrikeWSC : 0D, (int)ProbeOutputNum.ZPosition);
-        macro.exec.Setvar(axis == Axis.X ? positionError : 0D, (int)ProbeOutputNum.XError);
-        macro.exec.Setvar(axis == Axis.Y ? positionError : 0D, (int)ProbeOutputNum.YError);
-        macro.exec.Setvar(axis == Axis.Z ? positionError : 0D, (int)ProbeOutputNum.ZError);
-        macro.exec.Setvar(positionError, (int)ProbeOutputNum.PositionError);
+        outputs.Add(ProbeOutputNum.XPosition, axis == Axis.X ? positionStrikeWCS : 0D);
+        outputs.Add(ProbeOutputNum.YPosition, axis == Axis.Y ? positionStrikeWCS : 0D);
+        outputs.Add(ProbeOutputNum.ZPosition, axis == Axis.Z ? positionStrikeWCS : 0D);
+        outputs.Add(ProbeOutputNum.XError, axis == Axis.X ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.YError, axis == Axis.Y ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.ZError, axis == Axis.Z ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.PositionError, positionError);
 
         if(!this.AssertTolerance(macro, axis.ToString() + " position", positionTolerance, positionError)){
             return false;
         }
 
         if(!this.UpdateWCS(macro, wcsIndex, new []{
-            axis == Axis.X ? (double?)positionStrikeWSC : null,
-            axis == Axis.Y ? (double?)positionStrikeWSC : null,
-            axis == Axis.Z ? (double?)positionStrikeWSC : null
+            axis == Axis.X ? (double?)positionStrikeWCS : null,
+            axis == Axis.Y ? (double?)positionStrikeWCS : null,
+            axis == Axis.Z ? (double?)positionStrikeWCS : null
         })){
             return false;
         }
@@ -435,8 +450,8 @@ public class SurfaceProbeRoutine : ProbeRoutineBase {
     }
 }
 
-public class PocketWallProbeRoutine : ProbeRoutineBase {
-    public PocketWallProbeRoutine() {
+public class PocketWebProbeRoutine : ProbeRoutineBase {
+    public PocketWebProbeRoutine() {
         // Q, W, O added by ProbeRoutineBase
         this.Inputs.AddRange(new []{
             new ProbeInput('X', "Nominal axis width of feature", true, new []{'Y'}),
@@ -450,13 +465,13 @@ public class PocketWallProbeRoutine : ProbeRoutineBase {
 
     public override ProbeRoutine Routine {
         get {
-            return ProbeRoutine.PocketOrWall;
+            return ProbeRoutine.PocketOrWeb;
         }
     }
 
     public override string Help() {
         return String.Join("\n", new []{
-            "P" + (int)this.Routine + " (Pocket/Wall Probe)",
+            "P" + (int)this.Routine + " (Pocket/Web Probe)",
             "X or Y (Nominal axis measurement [size] of feature)",
             "Z (Z-axis position of measurement for feature surface)",
             "Q (Probe overtravel threshold)",
@@ -475,7 +490,9 @@ public class PocketWallProbeRoutine : ProbeRoutineBase {
         });
     }
 
-    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+    internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
+        outputs = new Dictionary<ProbeOutputNum, double>();
+
         var axisLabel = inputs.ContainsKey('X') ? 'X' : 'Y';
         var axis = (Axis)Enum.Parse(typeof(Axis), axisLabel.ToString());
         var sizeNominal = inputs[axisLabel];
@@ -489,8 +506,8 @@ public class PocketWallProbeRoutine : ProbeRoutineBase {
         var sizeTolerance = inputs.ContainsKey('E') ? (double?)inputs['E'] : null;
         var wcsIndex = inputs.ContainsKey('W') ? (int?)inputs['W'] : null;
 
-        double positionOriginalWSC = macro.GetWCSPosition(axis);
-        double positionZOriginalWSC = macro.GetWCSPosition(Axis.Z);
+        double positionOriginalWCS = macro.GetWCSPosition(axis);
+        double positionZOriginalWCS = macro.GetWCSPosition(Axis.Z);
         
         if(!macro.ExecuteGCode(
             "M213",
@@ -504,11 +521,11 @@ public class PocketWallProbeRoutine : ProbeRoutineBase {
             return false;
         }
 
-        double positionCurrentWSC = macro.GetWCSPosition(axis);
+        double positionCurrentWCS = macro.GetWCSPosition(axis);
 
-        double positionStrike1WSC;
-        double positionNominal1WCS = clearanceRel != null ? positionCurrentWSC + clearanceRel.Value : positionCurrentWSC - sizeHalfNominal;
-        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominal1WCS, out positionStrike1WSC)){
+        double positionStrike1WCS;
+        double positionNominal1WCS = clearanceRel != null ? positionCurrentWCS + clearanceRel.Value : positionCurrentWCS - sizeHalfNominal;
+        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominal1WCS, out positionStrike1WCS)){
             return false;
         }
 
@@ -516,9 +533,9 @@ public class PocketWallProbeRoutine : ProbeRoutineBase {
             "M213",
             "F" + settings.TravelFeedRate,
             // if has Z position, restore to original
-            positionZWCS != null ? ("G90 G1 Z" + macro.FormatD(positionZOriginalWSC)) : "",
+            positionZWCS != null ? ("G90 G1 Z" + macro.FormatD(positionZOriginalWCS)) : "",
             // go to to center
-            "G90 G1 " + axis.ToString() + macro.FormatD(positionStrike1WSC + sizeHalfNominal),
+            "G90 G1 " + axis.ToString() + macro.FormatD(positionStrike1WCS + sizeHalfNominal),
             // if has clearance, move relative half nominal + clearance
             clearanceRel != null ? ("G91 G1 " + axis.ToString() + macro.FormatD(sizeHalfNominal + clearanceRel.Value)) : "",
             // if has Z position, move to it
@@ -528,41 +545,41 @@ public class PocketWallProbeRoutine : ProbeRoutineBase {
             return false;
         }
         
-        positionCurrentWSC = macro.GetWCSPosition(axis);
+        positionCurrentWCS = macro.GetWCSPosition(axis);
         
-        double positionStrike2WSC;
-        double positionNominal2WCS = clearanceRel != null ? positionCurrentWSC - clearanceRel.Value : positionCurrentWSC + sizeHalfNominal;
-        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominal2WCS, out positionStrike2WSC)){
+        double positionStrike2WCS;
+        double positionNominal2WCS = clearanceRel != null ? positionCurrentWCS - clearanceRel.Value : positionCurrentWCS + sizeHalfNominal;
+        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominal2WCS, out positionStrike2WCS)){
             return false;
         }
 
-        var sizeMeasured =  macro.Distance(positionStrike1WSC, positionStrike2WSC);
-        var positionCenter = positionStrike1WSC + (sizeMeasured * 0.5D);
-        var positionError = macro.Distance(positionOriginalWSC, positionCenter);
-        var sizeError = macro.Distance(sizeNominal, sizeMeasured);
+        var sizeMeasured =  macro.Distance(positionStrike1WCS, positionStrike2WCS);
+        var positionCenterWCS = positionStrike1WCS + (sizeMeasured * 0.5D);
+        var positionError = positionOriginalWCS - positionCenterWCS;
+        var sizeError = sizeNominal - sizeMeasured;
 
-        macro.exec.AddStatusmessage("POS1:" + positionStrike1WSC + " POS2:" + positionStrike2WSC);
-        macro.exec.AddStatusmessage("SIZ:" + sizeMeasured + " CTR:" + positionCenter);
+        macro.exec.AddStatusmessage("POS1:" + positionStrike1WCS + " POS2:" + positionStrike2WCS);
+        macro.exec.AddStatusmessage("SIZ:" + sizeMeasured + " CTR:" + positionCenterWCS);
 
         if(!macro.ExecuteGCode(
             "M213",
             "F" + macro.FormatD(settings.TravelFeedRate),
             // if has Z position, restore to original
-            positionZWCS != null ? ("G90 G1 Z" + macro.FormatD(positionZOriginalWSC)) : "",
+            positionZWCS != null ? ("G90 G1 Z" + macro.FormatD(positionZOriginalWCS)) : "",
             // get to center based on strikes
-            "G90 G1 " + axis.ToString() + macro.FormatD(positionCenter),
+            "G90 G1 " + axis.ToString() + macro.FormatD(positionCenterWCS),
             "M214"
         )){
             return false;
         }
 
-        macro.exec.Setvar(axis == Axis.X ? positionCenter : 0D, (int)ProbeOutputNum.XPosition);
-        macro.exec.Setvar(axis == Axis.Y ? positionCenter : 0D, (int)ProbeOutputNum.YPosition);
-        macro.exec.Setvar(axis == Axis.X ? positionError : 0D, (int)ProbeOutputNum.XError);
-        macro.exec.Setvar(axis == Axis.Y ? positionError : 0D, (int)ProbeOutputNum.YError);
-        macro.exec.Setvar(sizeMeasured, (int)ProbeOutputNum.Measure);
-        macro.exec.Setvar(positionError, (int)ProbeOutputNum.PositionError);
-        macro.exec.Setvar(sizeError, (int)ProbeOutputNum.MeasureError);
+        outputs.Add(ProbeOutputNum.XPosition, axis == Axis.X ? positionCenterWCS : 0D);
+        outputs.Add(ProbeOutputNum.YPosition, axis == Axis.Y ? positionCenterWCS : 0D);
+        outputs.Add(ProbeOutputNum.XError, axis == Axis.X ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.YError, axis == Axis.Y ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.Measure, sizeMeasured);
+        outputs.Add(ProbeOutputNum.PositionError, positionError);
+        outputs.Add(ProbeOutputNum.MeasureError, sizeError);
 
         if(!this.AssertTolerance(macro, axis.ToString() + " position", positionTolerance, positionError)){
             return false;
@@ -573,16 +590,28 @@ public class PocketWallProbeRoutine : ProbeRoutineBase {
         }
 
         if(!this.UpdateWCS(macro, wcsIndex, new []{
-            axis == Axis.X ? (double?)positionCenter : null,
-            axis == Axis.Y ? (double?)positionCenter : null
+            axis == Axis.X ? (double?)positionCenterWCS : null,
+            axis == Axis.Y ? (double?)positionCenterWCS : null
         })){
             return false;
         }
         return true;
     }
 }
+ 
 
 public class BoreBossProbeRoutine : ProbeRoutineBase {
+    public BoreBossProbeRoutine() {
+        // Q, W, O added by ProbeRoutineBase
+        this.Inputs.AddRange(new []{
+            new ProbeInput('D', "Nominal size of feature", true),
+            new ProbeInput('Z', "Z-axis position of measurement", false),
+            new ProbeInput('R', "Axis clearance of feature", false),
+            new ProbeInput('N', "Position tolerance", false),
+            new ProbeInput('E', "Measurement [size] tolerance", false),
+        });
+    }
+
     public override ProbeRoutine Routine {
         get {
             return ProbeRoutine.BoreOrBoss;
@@ -610,9 +639,52 @@ public class BoreBossProbeRoutine : ProbeRoutineBase {
         });
     }
 
-    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
-        macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
-        return false;
+    internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
+        outputs = new Dictionary<ProbeOutputNum, double>();
+
+        // using PocketWeb routine in both X and Y
+        var subroutine = ProbeRoutines[ProbeRoutine.PocketOrWeb];
+        var subroutineInputs = new Dictionary<char, double>();
+
+        var sizeNominal = inputs['D'];
+        var sizeHalfNominal = sizeNominal * 0.5D;
+
+        var positionTolerance = inputs.ContainsKey('N') ? (double?)inputs['N'] : null;
+        var sizeTolerance = inputs.ContainsKey('E') ? (double?)inputs['E'] : null;
+        var wcsIndex = inputs.ContainsKey('W') ? (int?)inputs['W'] : null;
+
+        subroutineInputs.Add('Q', inputs['Q']);
+        if( inputs.ContainsKey('Z') ){
+            subroutineInputs.Add('Z', inputs['Z']);
+        }
+        if( inputs.ContainsKey('R') ){
+            subroutineInputs.Add('R', inputs['R']);
+        }
+
+        double positionXOriginalWCS = macro.GetWCSPosition(Axis.X);
+        double positionYOriginalWCS = macro.GetWCSPosition(Axis.Y);
+
+        Dictionary<ProbeOutputNum, double> outputsX;
+        inputs.Add('X', sizeNominal);
+        var result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
+        if(!result){
+            return false;
+        }
+
+        Dictionary<ProbeOutputNum, double> outputsY;
+        inputs.Remove('X');
+        inputs.Add('Y', sizeNominal);
+        result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsY);
+        if(!result){
+            return false;
+        }
+
+        var positionXCenterWCS = outputsX[ProbeOutputNum.XPosition];
+        var positionYCenterWCS = outputsY[ProbeOutputNum.YPosition];
+
+        var positionError = macro.Distance(positionXOriginalWCS, positionXCenterWCS, positionYOriginalWCS, positionYCenterWCS);
+
+        return result;
     }
 }
 
@@ -647,7 +719,8 @@ public class BoreBoss3PointProbeRoutine : ProbeRoutineBase {
         });
     }
 
-    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+    internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
+        outputs = new Dictionary<ProbeOutputNum, double>();
         macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
         return false;
     }
@@ -685,7 +758,8 @@ public class InternalCornerProbeRoutine : ProbeRoutineBase {
         });
     }
 
-    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+    internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
+        outputs = new Dictionary<ProbeOutputNum, double>();
         macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
         return false;
     }
@@ -723,7 +797,8 @@ public class ExternalCornerProbeRoutine : ProbeRoutineBase {
         });
     }
 
-    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+    internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
+        outputs = new Dictionary<ProbeOutputNum, double>();
         macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
         return false;
     }
@@ -754,7 +829,8 @@ public class SurfaceAngleProbeRoutine : ProbeRoutineBase {
         });
     }
 
-    protected override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs) {
+    internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
+        outputs = new Dictionary<ProbeOutputNum, double>();
         macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
         return false;
     }
