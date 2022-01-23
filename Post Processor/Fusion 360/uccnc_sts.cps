@@ -1,3 +1,5 @@
+/// <reference path="c:\Users\danstory\.vscode\extensions\autodesk.hsm-post-processor-3.5.6\res\language files\globals.d.ts" />
+
 /**
   Copyright (C) 2012-2021 by Autodesk, Inc.
   All rights reserved.
