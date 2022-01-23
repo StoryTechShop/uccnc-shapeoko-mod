@@ -428,6 +428,11 @@ if(!AssertClampPosition(atcLEDToolClamp, false, atcLEDToolRelease)){
 
 if(!exec.Ismacrostopped()) {
     exec.Setcurrenttool(0);
+    // reset tool offset
+    if(!ExecuteGCode("G49")){
+        exec.AddStatusmessage("M6: tool change interrupted");
+        return;
+    }
 }else{
     exec.AddStatusmessage("M6: tool change interrupted");
     return;
