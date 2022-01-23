@@ -9,7 +9,7 @@
 // ### M31 CONFIG ###
 
 // should apply G43 tool offset after successful tool probe offset
-var applyToolOffset = false;
+var applyToolOffset = true;
 
 // INPUT to detect if a tool is clamped
 var atcLEDToolClamp = 96; // InputPT3PN11
@@ -143,6 +143,7 @@ if(offsetNumber == toolMasterNumber){
     }
 }
 
+while(exec.IsMoving()){};
 // store original position to move back to
 var originalPosition = new Position(exec.GetXmachpos(), exec.GetYmachpos());
 var originalModal = AS3.Getfield(877).Split('|');
@@ -155,8 +156,8 @@ if(!ExecuteGCode(
     // move to fixed probe
     "G00 G53 X" + probePosition.X + " Y" + probePosition.Y,
     "G00 G53 Z" + probePositionZ,
-    // cancel out tool offset and scale
-    "G49 G50"
+    // cancel out tool offset, scale and rotation
+    "G49 G50 G69"
 )){
     exec.AddStatusmessage("M31: tool offset probe interrupted");
     return;
@@ -234,8 +235,11 @@ if(!exec.Ismacrostopped()){
 
     // update tool master
     if(offsetNumber == toolMasterNumber){
-        exec.AddStatusmessage("M31: Setting global master tool reference to Z" + FormatD(offsetProbeZ));
-        exec.Writekey("M31Macro", "MasterToolProbeZ", offsetProbeZ.ToString());
+        var masterZTo = FormatD(offsetProbeZ);
+        var masterZFrom = FormatD(toolMasterProbeZ);
+
+        exec.AddStatusmessage("M31: Setting T" + toolMasterNumber + " master tool reference" + (masterZTo != masterZFrom ? " from Z" + masterZFrom : "") + " to Z" + masterZTo);
+        exec.Writekey("M31Macro", "MasterToolProbeZ", masterZTo);
     }
 
     var offsetTo = FormatD(offsetToolZ);

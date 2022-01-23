@@ -135,9 +135,6 @@ var buttonCancel = 130;
 
 // ### M6 MACRO ###
 
-var toolCurrentNumber = exec.Getcurrenttool();
-var toolNewNumber = exec.Getnewtool();
-
  // check if machine is homed/referenced
 if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
 {
@@ -145,6 +142,14 @@ if(!exec.GetLED(56)||!exec.GetLED(57)||!exec.GetLED(58))
     Prompt("M6: Tool Change Failed", "Machine is not homed", "OK", PromptStatus.Error);
     return;
 }
+
+while(exec.IsMoving()){};
+// store original XY position and modal to restore
+var originalPosition = new Position(exec.GetXmachpos(), exec.GetYmachpos());
+var originalModal = AS3.Getfield(877).Split('|');
+
+var toolCurrentNumber = exec.Getcurrenttool();
+var toolNewNumber = exec.Getnewtool();
 
 // Check if there is a tool in the spindle
 if(toolCurrentNumber > 0 && !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)){
@@ -158,15 +163,13 @@ if(toolCurrentNumber == toolNewNumber){
     return;
 }
 
-// store original XY position and modal to restore
-var originalPosition = new Position(exec.GetXmachpos(), exec.GetYmachpos());
-var originalModal = AS3.Getfield(877).Split('|');
-
 if(!ExecuteGCode(
     // stop coolant and spindle
     "M9", "M5",
     // move to safe z
-    "G90 G00 G53 Z" + zSafe
+    "G90 G00 G53 Z" + zSafe,
+    // cancel out tool offset, scale and rotation
+    "G49 G50 G69"
 )){
     exec.AddStatusmessage("M6: tool change interrupted");
     return;
