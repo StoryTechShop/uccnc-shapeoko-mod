@@ -98,6 +98,16 @@ public double Distance(double x1, double x2, double y1, double y2) {
     return distance;
 }
 
+public double MaxError(params double[] errors) {
+    double maxError = errors[0];
+    foreach(var error in errors){
+        if(Math.Abs(maxError) < Math.Abs(error)){
+            maxError = error;
+        }
+    }
+    return maxError;
+}
+
 public enum ProbeRoutine {
     Surface = 1,
     PocketOrWeb = 2,
@@ -112,19 +122,24 @@ public enum ProbeOutputNum {
     XPosition = 2100,
     YPosition = 2101,
     ZPosition = 2102,
-    XError = 2110,
-    YError = 2111,
-    ZError = 2112,
 
-    XAngle = 2120,
-    YAngle = 2121,
-    XAngleError = 2130,
-    YAngleError = 2131,
+    XMeasure = 2104, // width, dia or angle
+    YMeasure = 2105,
+    ZMeasure = 2106,
 
-    Measure = 2140,
-    MeasureError = 2141,
+    Measure = 2109, // max measure for +2 datums
 
-    PositionError = 2150
+    XPositionError = 2110,
+    YPositionError = 2111,
+    ZPositionError = 2112,
+
+    XMeasureError = 2114, // width, dia or angle
+    YMeasureError = 2115,
+    ZMeasureError = 2116,
+
+    TruePositionError = 2117,
+    PositionError = 2118, // max error for +2 datums
+    MeasureError = 2119
 }
 
 public enum GetVarResult {
@@ -322,7 +337,7 @@ public abstract class ProbeRoutineBase {
             // first probe use fast feed, second use fine feed
             var feedRate = i < 1 ? settings.FastFeedRate : settings.FineFeedRate;
             // on first probe use position else use retract distance
-            var distance = i < 1 ? (direction > 0 ? surfacePositionWCS - currentPositionWCS : currentPositionWCS - surfacePositionWCS) : settings.Retract;
+            var distance = i < 1 ? macro.Distance(surfacePositionWCS, currentPositionWCS) : settings.Retract;
             distance = direction > 0 ? distance + overtravel : -distance - overtravel;
 
             macro.exec.AddStatusmessage(string.Format("CUR:{0}; SUF:{1}; DIS:{2}", currentPositionWCS, surfacePositionWCS, distance));
@@ -338,11 +353,11 @@ public abstract class ProbeRoutineBase {
             // check probe status outcome
             var probeStatus = macro.exec.Getvar(5060);
             if(probeStatus == 1){
-                macro.ExecuteGCode(string.Format("G90 G0 {0}{1}", axis, macro.FormatD(currentPositionWCS)));
+                // macro.ExecuteGCode(string.Format("G90 F{2} G1 {0}{1}", axis, macro.FormatD(currentPositionWCS), settings.TravelFeedRate));
                 macro.exec.AddStatusmessage("M32: probe routine failed to strike surface with-in travel");
                 return false;
             }else if(probeStatus != 0){
-                macro.ExecuteGCode(string.Format("G90 G0 {0}{1}", axis, macro.FormatD(currentPositionWCS)));
+                // macro.ExecuteGCode(string.Format("G90 F{2} G1 {0}{1}", axis, macro.FormatD(currentPositionWCS), settings.TravelFeedRate));
                 macro.exec.AddStatusmessage(string.Format("M32: probe routine failed to strike surface (ERR{0})", probeStatus));
                 return false;
             }
@@ -350,7 +365,7 @@ public abstract class ProbeRoutineBase {
             // on first probe use G90 retract distance otherwise restore original G90 position
             distance = direction > 0 ? -settings.Retract : settings.Retract; // inverted to move away from strike
             if(!macro.ExecuteGCode(
-                 string.Format("G{2} G0 {0}{1}", axis, macro.FormatD((i < 1 ? distance : currentPositionWCS)), i < 1 ? 91 : 90)
+                 string.Format("G{2} F{2} G1 {0}{1}", axis, macro.FormatD((i < 1 ? distance : currentPositionWCS)), i < 1 ? 91 : 90, settings.TravelFeedRate)
             )){
                 macro.exec.AddStatusmessage("M32: probe routine interrupted");
                 return false;
@@ -396,14 +411,7 @@ public class SurfaceProbeRoutine : ProbeRoutineBase {
             "N (Position tolerance)",
             "H (Tool offset number to update)",
             "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-            "O (Increment feature number [1], Increment component number and reset feature number [2])",
-            "#" + (int)ProbeOutputNum.XPosition + " (X-axis position)",
-            "#" + (int)ProbeOutputNum.YPosition + " (Y-axis position)",
-            "#" + (int)ProbeOutputNum.ZPosition + " (Z-axis position)",
-            "#" + (int)ProbeOutputNum.XError + " (X-axis error)",
-            "#" + (int)ProbeOutputNum.YError + " (Y-axis error)",
-            "#" + (int)ProbeOutputNum.ZError + " (Z-axis error)",
-            "#" + (int)ProbeOutputNum.PositionError + " (Position error)"
+            "O (Increment feature number [1], Increment component number and reset feature number [2])"
         });
     }
 
@@ -423,15 +431,15 @@ public class SurfaceProbeRoutine : ProbeRoutineBase {
             return false;
         }
 
-        var positionError = positionNominalWCS - positionStrikeWCS;
+        var positionError = positionStrikeWCS - positionNominalWCS;
         macro.exec.AddStatusmessage("POS: " + positionNominalWCS + " STK:" + positionStrikeWCS + " ERR:" + positionError);
 
         outputs.Add(ProbeOutputNum.XPosition, axis == Axis.X ? positionStrikeWCS : 0D);
         outputs.Add(ProbeOutputNum.YPosition, axis == Axis.Y ? positionStrikeWCS : 0D);
         outputs.Add(ProbeOutputNum.ZPosition, axis == Axis.Z ? positionStrikeWCS : 0D);
-        outputs.Add(ProbeOutputNum.XError, axis == Axis.X ? positionError : 0D);
-        outputs.Add(ProbeOutputNum.YError, axis == Axis.Y ? positionError : 0D);
-        outputs.Add(ProbeOutputNum.ZError, axis == Axis.Z ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.XPositionError, axis == Axis.X ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.YPositionError, axis == Axis.Y ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.ZPositionError, axis == Axis.Z ? positionError : 0D);
         outputs.Add(ProbeOutputNum.PositionError, positionError);
 
         if(!this.AssertTolerance(macro, axis.ToString() + " position", positionTolerance, positionError)){
@@ -479,14 +487,7 @@ public class PocketWebProbeRoutine : ProbeRoutineBase {
             "N (Position tolerance)",
             "E (Measurement [size] tolerance)",
             "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-            "O (Increment feature number [1], Increment component number and reset feature number [2])",
-            "#" + (int)ProbeOutputNum.XPosition + " (X-axis position)",
-            "#" + (int)ProbeOutputNum.YPosition + " (Y-axis position)",
-            "#" + (int)ProbeOutputNum.XError + " (X-axis error)",
-            "#" + (int)ProbeOutputNum.YError + " (Y-axis error)",
-            "#" + (int)ProbeOutputNum.Measure + " (Measured size)",
-            "#" + (int)ProbeOutputNum.MeasureError + " (Size error)",
-            "#" + (int)ProbeOutputNum.PositionError + " (Position error)"
+            "O (Increment feature number [1], Increment component number and reset feature number [2])"
         });
     }
 
@@ -524,8 +525,8 @@ public class PocketWebProbeRoutine : ProbeRoutineBase {
         double positionCurrentWCS = macro.GetWCSPosition(axis);
 
         double positionStrike1WCS;
-        double positionNominal1WCS = clearanceRel != null ? positionCurrentWCS + clearanceRel.Value : positionCurrentWCS - sizeHalfNominal;
-        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominal1WCS, out positionStrike1WCS)){
+        double positionSurface1WCS = clearanceRel != null ? positionCurrentWCS + clearanceRel.Value : positionCurrentWCS - sizeHalfNominal;
+        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionSurface1WCS, out positionStrike1WCS)){
             return false;
         }
 
@@ -534,8 +535,8 @@ public class PocketWebProbeRoutine : ProbeRoutineBase {
             "F" + settings.TravelFeedRate,
             // if has Z position, restore to original
             positionZWCS != null ? ("G90 G1 Z" + macro.FormatD(positionZOriginalWCS)) : "",
-            // go to to center
-            "G90 G1 " + axis.ToString() + macro.FormatD(positionStrike1WCS + sizeHalfNominal),
+            // go back to original position
+            "G90 G1 " + axis.ToString() + macro.FormatD(positionOriginalWCS),
             // if has clearance, move relative half nominal + clearance
             clearanceRel != null ? ("G91 G1 " + axis.ToString() + macro.FormatD(sizeHalfNominal + clearanceRel.Value)) : "",
             // if has Z position, move to it
@@ -548,15 +549,15 @@ public class PocketWebProbeRoutine : ProbeRoutineBase {
         positionCurrentWCS = macro.GetWCSPosition(axis);
         
         double positionStrike2WCS;
-        double positionNominal2WCS = clearanceRel != null ? positionCurrentWCS - clearanceRel.Value : positionCurrentWCS + sizeHalfNominal;
-        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionNominal2WCS, out positionStrike2WCS)){
+        double positionSurface2WCS = clearanceRel != null ? positionCurrentWCS - clearanceRel.Value : positionCurrentWCS + sizeHalfNominal;
+        if(!this.ProbeCycle(macro, settings, overtravel, axis, positionSurface2WCS, out positionStrike2WCS)){
             return false;
         }
 
         var sizeMeasured =  macro.Distance(positionStrike1WCS, positionStrike2WCS);
         var positionCenterWCS = positionStrike1WCS + (sizeMeasured * 0.5D);
-        var positionError = positionOriginalWCS - positionCenterWCS;
-        var sizeError = sizeNominal - sizeMeasured;
+        var positionError = positionCenterWCS - positionOriginalWCS;
+        var sizeError = sizeMeasured - sizeNominal;
 
         macro.exec.AddStatusmessage("POS1:" + positionStrike1WCS + " POS2:" + positionStrike2WCS);
         macro.exec.AddStatusmessage("SIZ:" + sizeMeasured + " CTR:" + positionCenterWCS);
@@ -575,9 +576,13 @@ public class PocketWebProbeRoutine : ProbeRoutineBase {
 
         outputs.Add(ProbeOutputNum.XPosition, axis == Axis.X ? positionCenterWCS : 0D);
         outputs.Add(ProbeOutputNum.YPosition, axis == Axis.Y ? positionCenterWCS : 0D);
-        outputs.Add(ProbeOutputNum.XError, axis == Axis.X ? positionError : 0D);
-        outputs.Add(ProbeOutputNum.YError, axis == Axis.Y ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.XPositionError, axis == Axis.X ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.YPositionError, axis == Axis.Y ? positionError : 0D);
+        outputs.Add(ProbeOutputNum.XMeasure, axis == Axis.X ? sizeMeasured : 0D);
+        outputs.Add(ProbeOutputNum.YMeasure, axis == Axis.Y ? sizeMeasured : 0D);
         outputs.Add(ProbeOutputNum.Measure, sizeMeasured);
+        outputs.Add(ProbeOutputNum.XMeasureError, axis == Axis.X ? sizeError : 0D);
+        outputs.Add(ProbeOutputNum.YMeasureError, axis == Axis.Y ? sizeError : 0D);
         outputs.Add(ProbeOutputNum.PositionError, positionError);
         outputs.Add(ProbeOutputNum.MeasureError, sizeError);
 
@@ -628,14 +633,7 @@ public class BoreBossProbeRoutine : ProbeRoutineBase {
             "N (Position tolerance)",
             "E (Measurement [size] tolerance)",
             "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-            "O (Increment feature number [1], Increment component number and reset feature number [2])",
-            "#" + (int)ProbeOutputNum.XPosition + " (X-axis position)",
-            "#" + (int)ProbeOutputNum.YPosition + " (Y-axis position)",
-            "#" + (int)ProbeOutputNum.XError + " (X-axis error)",
-            "#" + (int)ProbeOutputNum.YError + " (Y-axis error)",
-            "#" + (int)ProbeOutputNum.Measure + " (Measured size)",
-            "#" + (int)ProbeOutputNum.MeasureError + " (Size error)",
-            "#" + (int)ProbeOutputNum.PositionError + " (Position error)"
+            "O (Increment feature number [1], Increment component number and reset feature number [2])"
         });
     }
 
@@ -665,24 +663,54 @@ public class BoreBossProbeRoutine : ProbeRoutineBase {
         double positionYOriginalWCS = macro.GetWCSPosition(Axis.Y);
 
         Dictionary<ProbeOutputNum, double> outputsX;
-        inputs.Add('X', sizeNominal);
+        subroutineInputs.Add('X', sizeNominal);
         var result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
         if(!result){
             return false;
         }
 
         Dictionary<ProbeOutputNum, double> outputsY;
-        inputs.Remove('X');
-        inputs.Add('Y', sizeNominal);
+        subroutineInputs.Remove('X');
+        subroutineInputs.Add('Y', sizeNominal);
         result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsY);
         if(!result){
             return false;
         }
+        
+        // TODO: ability to config second cycle on X
+        if(false){
+            // do second cycle on X after centering
+            subroutineInputs.Remove('Y');
+            subroutineInputs.Add('X', sizeNominal);
+            result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
+            if(!result){
+                return false;
+            }
+        }
 
         var positionXCenterWCS = outputsX[ProbeOutputNum.XPosition];
         var positionYCenterWCS = outputsY[ProbeOutputNum.YPosition];
+        var sizeXMeasured = outputsX[ProbeOutputNum.XMeasure];
+        var sizeYMeasured = outputsY[ProbeOutputNum.YMeasure];
 
-        var positionError = macro.Distance(positionXOriginalWCS, positionXCenterWCS, positionYOriginalWCS, positionYCenterWCS);
+        var positionTrueError = macro.Distance(positionXOriginalWCS, positionXCenterWCS, positionYOriginalWCS, positionYCenterWCS);
+        var positionXError = positionXCenterWCS - positionXOriginalWCS;
+        var positionYError = positionYCenterWCS - positionYOriginalWCS;
+        var sizeXError = sizeXMeasured - sizeNominal;
+        var sizeYError = sizeYMeasured - sizeNominal;
+
+        outputs.Add(ProbeOutputNum.XPosition, positionXCenterWCS);
+        outputs.Add(ProbeOutputNum.YPosition, positionYCenterWCS);
+        outputs.Add(ProbeOutputNum.XPositionError, positionXError);
+        outputs.Add(ProbeOutputNum.YPositionError, positionYError);
+        outputs.Add(ProbeOutputNum.XMeasure, sizeXMeasured);
+        outputs.Add(ProbeOutputNum.YMeasure, sizeYMeasured);
+        outputs.Add(ProbeOutputNum.Measure, Math.Max(sizeXMeasured, sizeYMeasured));
+        outputs.Add(ProbeOutputNum.XMeasureError, sizeXError);
+        outputs.Add(ProbeOutputNum.YMeasureError, sizeYError);
+        outputs.Add(ProbeOutputNum.TruePositionError, positionTrueError);
+        outputs.Add(ProbeOutputNum.PositionError, macro.MaxError(positionXError, positionYError));
+        outputs.Add(ProbeOutputNum.MeasureError, macro.MaxError(sizeXError, sizeYError));
 
         return result;
     }
@@ -708,14 +736,7 @@ public class BoreBoss3PointProbeRoutine : ProbeRoutineBase {
             "N (Position tolerance)",
             "E (Measurement [size] tolerance)",
             "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-            "O (Increment feature number [1] or Increment component number and reset feature number [2])",
-            "#" + (int)ProbeOutputNum.XPosition + " (X-axis position)",
-            "#" + (int)ProbeOutputNum.YPosition + " (Y-axis position)",
-            "#" + (int)ProbeOutputNum.XError + " (X-axis error)",
-            "#" + (int)ProbeOutputNum.YError + " (Y-axis error)",
-            "#" + (int)ProbeOutputNum.Measure + " (Measured size)",
-            "#" + (int)ProbeOutputNum.MeasureError + " (Size error)",
-            "#" + (int)ProbeOutputNum.PositionError + " (Position error)"
+            "O (Increment feature number [1] or Increment component number and reset feature number [2])"
         });
     }
 
@@ -744,17 +765,7 @@ public class InternalCornerProbeRoutine : ProbeRoutineBase {
             "N (Position tolerance)",
             "B (Angle tolerance)",
             "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-            "O (Increment feature number [1], Increment component number and reset feature number [2])",
-            "#" + (int)ProbeOutputNum.XPosition + " (X-axis position)",
-            "#" + (int)ProbeOutputNum.YPosition + " (Y-axis position)",
-            "#" + (int)ProbeOutputNum.XError + " (X-axis error)",
-            "#" + (int)ProbeOutputNum.YError + " (Y-axis error)",
-            "#" + (int)ProbeOutputNum.XAngle + " (Measured +X-axis angle)",
-            "#" + (int)ProbeOutputNum.XAngleError + " (+X-axis angle error)",
-            "#" + (int)ProbeOutputNum.YAngle + " (Measured +Y-axis angle)",
-            "#" + (int)ProbeOutputNum.YAngleError + " (+Y-axis angle error)",
-            "#" + (int)ProbeOutputNum.Measure + " (Measured difference)",
-            "#" + (int)ProbeOutputNum.PositionError + " (Position error)"
+            "O (Increment feature number [1], Increment component number and reset feature number [2])"
         });
     }
 
@@ -783,17 +794,7 @@ public class ExternalCornerProbeRoutine : ProbeRoutineBase {
             "N (Position tolerance)",
             "B (Angle tolerance)",
             "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-            "O (Increment feature number [1], Increment component number and reset feature number [2])",
-            "#" + (int)ProbeOutputNum.XPosition + " (X-axis position)",
-            "#" + (int)ProbeOutputNum.YPosition + " (Y-axis position)",
-            "#" + (int)ProbeOutputNum.XError + " (X-axis error)",
-            "#" + (int)ProbeOutputNum.YError + " (Y-axis error)",
-            "#" + (int)ProbeOutputNum.XAngle + " (Measured +X-axis angle)",
-            "#" + (int)ProbeOutputNum.XAngleError + " (+X-axis angle error)",
-            "#" + (int)ProbeOutputNum.YAngle + " (Measured +Y-axis angle)",
-            "#" + (int)ProbeOutputNum.YAngleError + " (+Y-axis angle error)",
-            "#" + (int)ProbeOutputNum.Measure + " (Measured difference)",
-            "#" + (int)ProbeOutputNum.PositionError + " (Position error)"
+            "O (Increment feature number [1], Increment component number and reset feature number [2])"
         });
     }
 
@@ -820,12 +821,7 @@ public class SurfaceAngleProbeRoutine : ProbeRoutineBase {
             "A (Nominal angle measurement)",
             "B (Angle tolerance)",
             "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-            "O (Increment feature number [1], Increment component number and reset feature number [2])",
-            "#" + (int)ProbeOutputNum.XAngle + " (Measured +X-axis angle)",
-            "#" + (int)ProbeOutputNum.XAngleError + " (+X-axis angle error)",
-            "#" + (int)ProbeOutputNum.YAngle + " (Measured +Y-axis angle)",
-            "#" + (int)ProbeOutputNum.YAngleError + " (+Y-axis angle error)",
-            "#" + (int)ProbeOutputNum.Measure + " (Measured difference)"
+            "O (Increment feature number [1], Increment component number and reset feature number [2])"
         });
     }
 
