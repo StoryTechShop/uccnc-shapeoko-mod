@@ -1665,7 +1665,7 @@ function setProbeAngle() {
     case "G68":
       gRotationModal.reset();
       gAbsIncModal.reset();
-      writeBlock(gRotationModal.format(68), gAbsIncModal.format(90), probeVariables.compensationXY, "R[#2130]");
+      writeBlock(gRotationModal.format(68), gAbsIncModal.format(90), probeVariables.compensationXY, "R[#2109]");
       validateWorkOffset = true;
       break;
     /*
@@ -1731,7 +1731,7 @@ function getProbingArguments(cycle, updateWCS) {
   }
   return [
     (cycle.angleAskewAction == "stop-message" ? "B" + xyzFormat.format(cycle.toleranceAngle ? cycle.toleranceAngle : 0) : undefined),
-    ((cycle.updateToolWear && cycle.toolWearErrorCorrection < 100) ? "F" + xyzFormat.format(cycle.toolWearErrorCorrection ? cycle.toolWearErrorCorrection / 100 : 100) : undefined),
+    ((cycle.updateToolWear && cycle.toolWearErrorCorrection < 100) ? "K" + xyzFormat.format(cycle.toolWearErrorCorrection ? cycle.toolWearErrorCorrection / 100 : 100) : undefined),
     (cycle.wrongSizeAction == "stop-message" ? "E" + xyzFormat.format(cycle.toleranceSize ? cycle.toleranceSize : 0) : undefined),
     (cycle.outOfPositionAction == "stop-message" ? "N" + xyzFormat.format(cycle.tolerancePosition ? cycle.tolerancePosition : 0) : undefined),
     ((cycle.updateToolWear && cycleType == "probing-z") ? "H" + xyzFormat.format(cycle.toolLengthOffset) : undefined),
