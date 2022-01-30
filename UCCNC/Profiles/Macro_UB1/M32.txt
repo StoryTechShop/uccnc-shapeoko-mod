@@ -28,10 +28,10 @@ var probeDia = toolNumber > 0 ? double.Parse(AS3.Getfield(fieldStartIdxToolDia +
 // ### M32 MACRO ###
 
 var pVar = Allvars != null ? (double?)Allvars.Pvar : null;
-if (!Validate(pVar != null, "M32: P is required, probe routine")) {
+if (!Validate(pVar != null, "M32: P is required")) {
   return;
 }
-if (!Validate(pVar.Value % 1 == 0, "M32: P must be an integer, probe routine")) {
+if (!Validate(pVar.Value % 1 == 0, "M32: P must be an integer")) {
   return;
 }
 var pRoutine = (ProbeRoutine)(int)pVar.Value;
@@ -46,12 +46,6 @@ if (!routine.Execute(this, probeSettings, Allvars)) {
   return;
 }
 
-exec.Wait(2000);
-foreach (ProbeOutputNum output in Enum.GetValues(typeof(ProbeOutputNum))) {
-  var value = exec.Getvar((int)output);
-  exec.AddStatusmessage(output.ToString() + " #" + (int)output + ": " + FormatD(value));
-}
-
 
 //#Events
 // ### GLOBAL UTILS ###
@@ -62,12 +56,19 @@ private bool ExecuteGCode(params string[] lines) {
   }
 
   var gcode = new List<string>(lines);
-  // gcode.ForEach(line =>  exec.AddStatusmessage(line));
+  gcode.ForEach(line => exec.AddStatusmessage(line));
   exec.Codelist(gcode);
   while (exec.IsMoving()) { }
 
   var result = !exec.Ismacrostopped() && !exec.GetLED(25); // !STOP && !RESET
   return result;
+}
+
+public void ClipboardSetText(string text) {
+  Thread thread = new Thread(() => System.Windows.Forms.Clipboard.SetText(text));
+  thread.SetApartmentState(ApartmentState.STA);
+  thread.Start();
+  thread.Join();
 }
 
 public string FormatD(double? num) {
@@ -98,19 +99,79 @@ public double Distance(double a, double b) {
   return Math.Abs(distance);
 }
 
-public double Distance(double x1, double x2, double y1, double y2) {
+public double Distance(double x1, double y1, double x2, double y2) {
   var distance = Math.Sqrt(Math.Pow((x2 - x1), 2) + Math.Pow((y2 - y1), 2));
   return distance;
 }
 
-public double MaxError(params double[] errors) {
-  double maxError = errors[0];
-  foreach (var error in errors) {
-    if (Math.Abs(maxError) < Math.Abs(error)) {
-      maxError = error;
+public bool Intersection(
+  double aX1, double aY1, double aX2, double aY2,
+  double bX1, double bY1, double bX2, double bY2,
+  out double x, out double y
+) {
+  double a1 = aY2 - aY1;
+  double b1 = aX1 - aX2;
+  double c1 = a1 * aX1 + b1 * aY1;
+
+  double a2 = bY2 - bY1;
+  double b2 = bX1 - bX2;
+  double c2 = a2 * bX1 + b2 * bY1;
+
+  double delta = a1 * b2 - a2 * b1;
+
+  if (delta == 0D) {
+    x = 0D;
+    y = 0D;
+    return false;
+  }
+
+  x = (b2 * c1 - b1 * c2) / delta;
+  y = (a1 * c2 - a2 * c1) / delta;
+  return true;
+}
+
+public void Perpendicular(
+  double aX1, double aY1, double aX2, double aY2,
+  double bX, double bY,
+  out double x, out double y
+) {
+  double a1 = aY2 - aY1;
+  double b1 = aX1 - aX2;
+  double c1 = a1 * aX1 + b1 * aY1;
+
+  double k = ((aY2 - aY1) * (bX - aX1) - (aX2 - aX1) * (bY - aY1)) / (Math.Pow(aY2 - aY1, 2) + Math.Pow(aX2 - aX1, 2));
+  x = bX - k * (aY2 - aY1);
+  y = bY + k * (aX2 - aX1);
+}
+
+public double RadiansToDegrees(double radians) {
+  return radians * (180D / Math.PI);
+}
+
+public double AngleRadians(double x1, double y1, double x2, double y2) {
+  double angle = Math.Atan2(y1 - y2, x1 - x2);
+   // if obtuse, get acute angle
+  // var piHalf = (Math.PI * 0.5D);
+  // angle = angle > piHalf ? angle = Math.PI - angle : angle;
+  return angle;
+}
+
+public double AngleRadians(double a1, double a2) {
+  double angle = a2 - a1;
+  // if obtuse, get acute angle
+  var piHalf = (Math.PI * 0.5D);
+  angle = angle > piHalf ? angle = Math.PI - angle : angle;
+  return angle;
+}
+
+public double MaxDifference(params double[] differences) {
+  double maxDiff = differences[0];
+  foreach (var diff in differences) {
+    if (Math.Abs(maxDiff) < Math.Abs(diff)) {
+      maxDiff = diff;
     }
   }
-  return maxError;
+  return maxDiff;
 }
 
 public enum LogLevel {
@@ -320,6 +381,7 @@ public abstract class ProbeRoutineBase {
 
     foreach (var output in outputs) {
       macro.exec.Setvar(output.Value, (int)output.Key);
+      macro.exec.AddStatusmessage(output.Key.ToString() + " #" + (int)output.Key + ": " + macro.FormatD(output.Value));
     }
     while (macro.exec.IsMoving()) { }
 
@@ -365,32 +427,45 @@ public abstract class ProbeRoutineBase {
 
     var gcodeFilepath = macro.AS3.Getfield(895); // loaded gcode file
     try {
-      if (gcodeFilepath.Length < 1 && gcodeFilepath == "-" && !System.IO.File.Exists(gcodeFilepath)) {
-        return;
+      if (
+        macro.exec.GetLED(216) || // Is Running MDI
+        gcodeFilepath.Length < 1 || gcodeFilepath == "-" ||
+        !System.IO.File.Exists(gcodeFilepath)
+      ) {
+        var reportsPath = System.IO.Path.Combine(System.Environment.CurrentDirectory, "Probe Reports");
+        if (!System.IO.Directory.Exists(reportsPath)) {
+          System.IO.Directory.CreateDirectory(reportsPath);
+        }
+
+        gcodeFilepath = System.IO.Path.Combine(reportsPath, DateTime.Now.ToString("yyyy-MM-dd"));
       }
       var reportFilepath = gcodeFilepath + ".report.csv";
 
       var outputNums = Array.FindAll((ProbeOutputNum[])Enum.GetValues(typeof(ProbeOutputNum)), o => o != ProbeOutputNum.ComponentNumber &&
                                                                                                   o != ProbeOutputNum.FeatureNumber);
       if (!System.IO.File.Exists(reportFilepath)) {
-        var header = new List<string>();
-        header.Add(ProbeOutputNum.ComponentNumber.ToString());
-        header.Add(ProbeOutputNum.FeatureNumber.ToString());
-        header.Add(typeof(ProbeRoutine).Name);
+        var header = new List<string>(new string[]{
+          "Date",
+          ProbeOutputNum.ComponentNumber.ToString(),
+          ProbeOutputNum.FeatureNumber.ToString(),
+          typeof(ProbeRoutine).Name
+        });
         Array.ForEach(outputNums, outputNum => header.Add(outputNum.ToString()));
 
         // write csv header
-        System.IO.File.AppendAllText(reportFilepath, string.Join(",", header));
+        System.IO.File.AppendAllText(reportFilepath, string.Join(",", header) + System.Environment.NewLine);
       }
 
-      var row = new List<string>();
-      row.Add(componentNumber.ToString());
-      row.Add(featureNumber.ToString());
-      row.Add("P" + (int)this.Routine);
+      var row = new List<string>(new string[]{
+        DateTime.Now.ToString("o"),
+        componentNumber.ToString(),
+        featureNumber.ToString(),
+        "P" + (int)this.Routine
+      });
       Array.ForEach(outputNums, outputNum => row.Add(outputs.ContainsKey(outputNum) ? macro.FormatD(outputs[outputNum]) : ""));
 
       // write report row
-      System.IO.File.AppendAllText(reportFilepath, string.Join(",", row));
+      System.IO.File.AppendAllText(reportFilepath, string.Join(",", row) + System.Environment.NewLine);
     }
     catch (Exception ex) {
       macro.exec.AddStatusmessage("M32: Failed to write probe report for component #" + componentNumber + ", feature #" + featureNumber + "; " + ex.Message);
@@ -505,7 +580,7 @@ public abstract class ProbeRoutineBase {
 
       if (!macro.ExecuteGCode(
           // start probing
-          string.Format("G91 F{0} G31 {1}{2}", macro.FormatD(feedRate), axis, macro.FormatD(distance))
+          "G91 F" + macro.FormatD(feedRate) + " G31 " + axis.ToString() + macro.FormatD(distance)
       )) {
         macro.exec.AddStatusmessage("M32: probe routine interrupted");
         return false;
@@ -527,7 +602,7 @@ public abstract class ProbeRoutineBase {
       // on first probe use G90 retract distance otherwise restore original G90 position
       distance = direction > 0 ? -settings.Retract : settings.Retract; // inverted to move away from strike
       if (!macro.ExecuteGCode(
-           string.Format("G{2} F{2} G1 {0}{1}", axis, macro.FormatD((i < 1 ? distance : currentPositionWCS)), i < 1 ? 91 : 90, settings.TravelFeedRate)
+           "G" + (i < 1 ? 91 : 90) + " F" + settings.TravelFeedRate + " G1 " + axis.ToString() + macro.FormatD((i < 1 ? distance : currentPositionWCS))
       )) {
         macro.exec.AddStatusmessage("M32: probe routine interrupted");
         return false;
@@ -796,7 +871,7 @@ public class BoreBossProbeRoutine : ProbeRoutineBase {
     var sizeHalfNominal = sizeNominal * 0.5D;
 
     var positionTolerance = inputs.ContainsKey('N') ? (double?)inputs['N'] : null;
-    var positionTrueTolerance = inputs.ContainsKey('P') ? (double?)inputs['P'] : null;
+    var positionTrueTolerance = inputs.ContainsKey('L') ? (double?)inputs['L'] : null;
     var sizeTolerance = inputs.ContainsKey('E') ? (double?)inputs['E'] : null;
     var wcsIndex = inputs.ContainsKey('W') ? (int?)inputs['W'] : null;
 
@@ -842,15 +917,15 @@ public class BoreBossProbeRoutine : ProbeRoutineBase {
     var sizeXDimension = outputsX[ProbeOutputNum.XDimension];
     var sizeYDimension = outputsY[ProbeOutputNum.YDimension];
 
-    var positionTrueError = macro.Distance(positionXOriginalWCS, positionXCenterWCS, positionYOriginalWCS, positionYCenterWCS);
+    var positionTrueError = macro.Distance(positionXOriginalWCS, positionYOriginalWCS, positionXCenterWCS, positionYCenterWCS);
     var positionXError = positionXCenterWCS - positionXOriginalWCS;
     var positionYError = positionYCenterWCS - positionYOriginalWCS;
-    var positionError = macro.MaxError(positionXError, positionYError);
+    var positionError = macro.MaxDifference(positionXError, positionYError);
 
     var sizeXError = sizeXDimension - sizeNominal;
     var sizeYError = sizeYDimension - sizeNominal;
     var sizeDimension = Math.Max(sizeXDimension, sizeYDimension);
-    var sizeError = macro.MaxError(sizeXError, sizeYError);
+    var sizeError = macro.MaxDifference(sizeXError, sizeYError);
 
     var outOfTolerance = !this.AssertTolerance(macro, "X position", positionTolerance, positionXError);
     outOfTolerance = outOfTolerance ? outOfTolerance : !this.AssertTolerance(macro, "Y position", positionTolerance, positionYError);
@@ -931,15 +1006,12 @@ public class InternalCornerProbeRoutine : ProbeRoutineBase {
     this.Inputs.AddRange(new[]{
           new ProbeInput('X', "Nominal axis position of feature", true),
           new ProbeInput('Y', "Nominal axis position of feature", true),
-          new ProbeInput('I', "Incermental X-axis distance of secondary probe", false, new ProbeInputGroup(null, new char['J'])),
-          new ProbeInput('J', "Incermental Y-axis distance of secondary probe", false, new ProbeInputGroup(null, new char['I'])),
+          new ProbeInput('I', "Incermental X-axis distance of secondary probe", false),
+          new ProbeInput('J', "Incermental Y-axis distance of secondary probe", false),
 
           new ProbeInput('N', "Position tolerance", false, false, 0, null),
-          new ProbeInput('E', "Dimension [angle] tolerance", false, false, 0, null),
-
-          new ProbeInput('H', "Tool offset number to update", false),
-          new ProbeInput('K', "Tool offset apply precentage", false, false, 0, 1, new ProbeInputGroup(null, new []{'H'})),
-          new ProbeInput('V', "Tool offset dead zone", false, false, 0, null, new ProbeInputGroup(null, new []{'H'}))
+          new ProbeInput('L', "True position tolerance", false, false, 0, null),
+          new ProbeInput('B', "Dimension [angle] tolerance", false, false, 0, null, new ProbeInputGroup(null, new char[]{'I', 'J'})),
       });
   }
 
@@ -949,27 +1021,186 @@ public class InternalCornerProbeRoutine : ProbeRoutineBase {
     }
   }
 
-  /*
-  public override string Help() {
-    return String.Join("\n", new[]{
-          "P" + (int)this.Routine + " (Internal Corner Probe)",
-          "X (Nominal X-axis position of corner)",
-          "Y (Nominal Y-axis position of corner)",
-          "I (Relative distance to secondary X-axis probe)",
-          "J (Relative distance to secondary Y-axis probe)",
-          "Q (Probe overtravel threshold)",
-          "N (Position tolerance)",
-          "B (Angle tolerance)",
-          "W (Work coordinate system to update [0 = active, 1-6=G54-G59])",
-          "O (Increment feature number [1], Increment component number and reset feature number [2])"
-      });
-  }
-  */
-
   internal override bool InternalExecute(Macroclass macro, ProbeSettings settings, Dictionary<char, double> inputs, out Dictionary<ProbeOutputNum, double> outputs) {
     outputs = new Dictionary<ProbeOutputNum, double>();
-    macro.exec.AddStatusmessage(string.Format("M32: P{0} Not Implemented", (int)this.Routine));
-    return false;
+
+    // using Surface routine
+    var subroutine = ProbeRoutines[ProbeRoutine.Surface];
+    var subroutineInputs = new Dictionary<char, double>();
+
+    var positionXNominal = inputs['X'];
+    var positionYNominal = inputs['Y'];
+
+    var incrementX = inputs.ContainsKey('I') ? (double?)inputs['I'] : null;
+    var incrementY = inputs.ContainsKey('J') ? (double?)inputs['J'] : null;
+
+    var positionTolerance = inputs.ContainsKey('N') ? (double?)inputs['N'] : null;
+    double? positionTrueTolerance = inputs.ContainsKey('L') ? (double?)inputs['L'] : null;
+    var angleTolerance = inputs.ContainsKey('B') ? (double?)inputs['B'] : null;
+    var wcsIndex = inputs.ContainsKey('W') ? (int?)inputs['W'] : null;
+
+    subroutineInputs.Add('Q', inputs['Q']);
+
+    double positionXOriginalWCS = macro.GetWCSPosition(Axis.X);
+    double positionYOriginalWCS = macro.GetWCSPosition(Axis.Y);
+
+    Dictionary<ProbeOutputNum, double> outputsX;
+    subroutineInputs.Add('X', positionXNominal);
+    var result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
+    if (!result) {
+      return false;
+    }
+    var positionX1WCS = outputsX[ProbeOutputNum.XPosition];
+    var positionX2WCS = positionX1WCS;
+
+    if (incrementY != null) {
+      // move to secondary probe position
+      if (!macro.ExecuteGCode(
+        "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS),
+        "G91 F" + macro.FormatD(settings.TravelFeedRate) + " G1 Y" + macro.FormatD(incrementY)
+      )) {
+        return false;
+      }
+
+      result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
+      if (!result) {
+        return false;
+      }
+      positionX2WCS = outputsX[ProbeOutputNum.XPosition];
+
+      // move back to original position
+      if (!macro.ExecuteGCode(
+        "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS)
+      )) {
+        return false;
+      }
+    }
+
+    Dictionary<ProbeOutputNum, double> outputsY;
+    subroutineInputs.Remove('X');
+    subroutineInputs.Add('Y', positionYNominal);
+    result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsY);
+    if (!result) {
+      return false;
+    }
+    var positionY1WCS = outputsY[ProbeOutputNum.YPosition];
+    var positionY2WCS = positionY1WCS;
+
+    if (incrementX != null) {
+      // move to secondary probe position
+      if (!macro.ExecuteGCode(
+        "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS),
+        "G91 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(incrementX)
+      )) {
+        return false;
+      }
+
+      result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsY);
+      if (!result) {
+        return false;
+      }
+      positionY2WCS = outputsY[ProbeOutputNum.YPosition];
+
+      // move back to original position
+      if (!macro.ExecuteGCode(
+        "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS)
+      )) {
+        return false;
+      }
+    }
+
+    double positionX2SecondaryWCS = positionXOriginalWCS + (incrementX ?? 1D);
+    double positionY2SecondaryWCS = positionYOriginalWCS + (incrementY ?? 1D);
+
+    double positionXCornerWCS;
+    double positionYCornerWCS;
+    if (incrementY != null && incrementX == null) {
+      // get perpendicular point from Y-axis line and X-axis point
+      macro.Perpendicular(
+        positionX1WCS, positionYOriginalWCS, positionX2WCS, positionX2SecondaryWCS,
+        positionXOriginalWCS, positionY1WCS,
+        out positionX2SecondaryWCS, out positionY2WCS
+      );
+    }
+
+    else if (incrementX != null && incrementY == null) {
+      // get perpendicular point from X-axis line and Y-axis point
+      macro.Perpendicular(
+        positionXOriginalWCS, positionY1WCS, positionX2SecondaryWCS, positionY2WCS,
+        positionX1WCS, positionYOriginalWCS,
+        out positionX2WCS, out positionY2SecondaryWCS
+      );
+    }
+
+    // intersection from XY axis lines
+    if (!macro.Intersection(
+      positionX1WCS, positionYOriginalWCS, positionX2WCS, positionY2SecondaryWCS,
+      positionXOriginalWCS, positionY1WCS, positionX2SecondaryWCS, positionY2WCS,
+      out positionXCornerWCS, out positionYCornerWCS
+    )) {
+      macro.exec.AddStatusmessage("M32: Failed to calculate corner position");
+      return false;
+    }
+
+    var positionTrueError = macro.Distance(positionXNominal, positionYNominal, positionXCornerWCS, positionYCornerWCS);
+    var positionXError = positionXCornerWCS - positionXNominal;
+    var positionYError = positionYCornerWCS - positionYNominal;
+    var positionError = macro.MaxDifference(positionXError, positionYError);
+
+    var angleXDimension = positionX2WCS > positionX1WCS ?
+                            macro.AngleRadians(positionX2WCS, positionY2SecondaryWCS, positionX1WCS, positionYOriginalWCS) :
+                            macro.AngleRadians(positionX1WCS, positionYOriginalWCS, positionX2WCS, positionY2SecondaryWCS);
+    var angleYDimension = positionY2WCS < positionY1WCS ?
+                            macro.AngleRadians(positionX2SecondaryWCS, positionY2WCS, positionXOriginalWCS, positionY1WCS) :
+                            macro.AngleRadians(positionXOriginalWCS, positionY1WCS, positionX2SecondaryWCS, positionY2WCS);
+
+    var angleDimension = macro.AngleRadians(angleXDimension, angleYDimension);
+    angleXDimension = macro.RadiansToDegrees(angleXDimension);
+    angleYDimension = macro.RadiansToDegrees(angleYDimension);
+    angleDimension = Math.Abs(macro.RadiansToDegrees(angleDimension));
+
+    // angleXDimension = Math.Abs(angleXDimension) > 90D ? angleXDimension - 90 : angleXDimension;
+    // angleXDimension = angleXDimension > 90D ? angleXDimension - 90D : angleXDimension < -90D ? angleXDimension + 90D : angleXDimension;
+    // angleYDimension = angleYDimension > 90D ? angleYDimension - 90D : angleYDimension < -90D ? angleYDimension + 90D : angleYDimension;
+
+    var angleXError = angleXDimension > 0 ? angleXDimension - 90D : angleXDimension + 90D;
+    var angleYError = angleYDimension;
+    var angleError = angleDimension > 0 ? angleDimension - 90D : angleDimension + 90D;
+
+    var outOfTolerance = !this.AssertTolerance(macro, "X position", positionTolerance, positionXError);
+    outOfTolerance = outOfTolerance ? outOfTolerance : !this.AssertTolerance(macro, "Y position", positionTolerance, positionYError);
+    outOfTolerance = outOfTolerance ? outOfTolerance : !this.AssertTolerance(macro, "true position", positionTrueTolerance, positionTrueError);
+    outOfTolerance = outOfTolerance ? outOfTolerance : !this.AssertTolerance(macro, "measured X dimension", angleTolerance, angleXError);
+    outOfTolerance = outOfTolerance ? outOfTolerance : !this.AssertTolerance(macro, "measured Y dimension", angleTolerance, angleYError);
+
+    outputs.Add(ProbeOutputNum.XPosition, positionXCornerWCS);
+    outputs.Add(ProbeOutputNum.YPosition, positionYCornerWCS);
+    outputs.Add(ProbeOutputNum.XPositionError, positionXError);
+    outputs.Add(ProbeOutputNum.YPositionError, positionYError);
+    outputs.Add(ProbeOutputNum.XDimension, angleXDimension);
+    outputs.Add(ProbeOutputNum.YDimension, angleYDimension);
+    outputs.Add(ProbeOutputNum.XDimensionError, angleXError);
+    outputs.Add(ProbeOutputNum.YDimensionError, angleYError);
+    outputs.Add(ProbeOutputNum.TruePositionError, positionTrueError);
+    outputs.Add(ProbeOutputNum.PositionError, positionError);
+    outputs.Add(ProbeOutputNum.OutOfTolerance, outOfTolerance ? 1D : 0D);
+    outputs.Add(ProbeOutputNum.Dimension, angleDimension);
+    outputs.Add(ProbeOutputNum.DimensionError, angleError);
+
+    this.AppendToReport(macro, inputs.ContainsKey('O') ? (int?)inputs['O'] : null, outputs);
+
+    if (outOfTolerance) {
+      return false;
+    }
+
+    if (!this.UpdateWCS(macro, wcsIndex, inputs, new Tuple<double, double>[]{
+          new Tuple<double, double>(positionXCornerWCS, positionXError),
+          new Tuple<double, double>(positionYCornerWCS, positionYError)
+      })) {
+      return false;
+    }
+
+    return result;
   }
 }
 

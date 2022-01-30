@@ -1533,7 +1533,7 @@ function onCyclePoint(x, y, z) {
       protectedProbeMove(cycle, x, y, z - cycle.depth);
       writeBlock(
         mFormat.format(32), "{",
-        "P" + 6, // internal corner probe routine
+        "P" + 5, // internal corner probe routine
         xOutput.format(cornerX), yOutput.format(cornerY),
         conditional(cornerI != 0, "I" + xyzFormat.format(cornerI)),
         conditional(cornerJ != 0, "J" + xyzFormat.format(cornerJ)),
@@ -1560,7 +1560,7 @@ function onCyclePoint(x, y, z) {
       protectedProbeMove(cycle, x, y, z - cycle.depth);
       writeBlock(
         mFormat.format(32), "{",
-        "P" + 5, // external corner probe routine
+        "P" + 6, // external corner probe routine
         xOutput.format(cornerX), yOutput.format(cornerY),
         conditional(cornerI != 0, "I" + xyzFormat.format(cornerI)),
         conditional(cornerJ != 0, "J" + xyzFormat.format(cornerJ)),
