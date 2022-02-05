@@ -33,17 +33,14 @@ if(exec.Ismacrorunning(90000) > 1){
 DateTime atcSealOnSince = DateTime.UtcNow;
 
 while(loop && !exec.Ismacrostopped()) {
-
-    if(
-        // Check if any LEDs equal the expected state for air to be on
-        Array.FindIndex(LEDs, led => exec.GetLED(led.Num) == led.State) > -1
-        && exec.GetLED(atcLEDAirSeal) != true
-    ){
+    // Check if any LEDs equal the expected state for air to be on 
+    var airTurnOn = Array.FindIndex(LEDs, led => exec.GetLED(led.Num) == led.State) > -1;
+    var airIsOn = exec.GetLED(atcLEDAirSeal);
+    if(airTurnOn && !airIsOn){
         exec.Setoutpin(atcOutputAirSeal.Port, atcOutputAirSeal.Pin);
         atcSealOnSince = DateTime.UtcNow;
-    }else if(
-        exec.GetLED(atcLEDAirSeal) != false
-    ){
+
+    }else if(!airTurnOn && airIsOn){
         // Delay turning off ATC Seal by 3 seconds
         TimeSpan elapsed = DateTime.UtcNow - atcSealOnSince;
         if(elapsed.TotalSeconds > atcAirSealOffDelaySecs){

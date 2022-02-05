@@ -55,7 +55,7 @@ private bool ExecuteGCode(params string[] lines) {
     }
 
     var gcode = new List<string>(lines);
-    gcode.ForEach(line =>  exec.AddStatusmessage(line));
+    // gcode.ForEach(line =>  exec.AddStatusmessage(line));
     exec.Codelist(gcode);
     while(exec.IsMoving()){}
 
