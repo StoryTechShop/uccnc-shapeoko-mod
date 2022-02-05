@@ -1053,42 +1053,9 @@ public class Macroclass {
       double positionXOriginalWCS = macro.GetWCSPosition(Axis.X);
       double positionYOriginalWCS = macro.GetWCSPosition(Axis.Y);
 
-      Dictionary<ProbeOutputNum, double> outputsX;
-      subroutineInputs.Add('X', positionXNominal);
-      var result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
-      if (!result) {
-        return false;
-      }
-      var positionX1WCS = outputsX[ProbeOutputNum.XPosition];
-      var positionX2WCS = positionX1WCS;
-
-      if (incrementY != null) {
-        // move to secondary probe position
-        if (!macro.ExecuteGCode(
-          "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS),
-          "G91 F" + macro.FormatD(settings.TravelFeedRate) + " G1 Y" + macro.FormatD(incrementY)
-        )) {
-          return false;
-        }
-
-        result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
-        if (!result) {
-          return false;
-        }
-        positionX2WCS = outputsX[ProbeOutputNum.XPosition];
-
-        // move back to original position
-        if (!macro.ExecuteGCode(
-          "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS)
-        )) {
-          return false;
-        }
-      }
-
       Dictionary<ProbeOutputNum, double> outputsY;
-      subroutineInputs.Remove('X');
       subroutineInputs.Add('Y', positionYNominal);
-      result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsY);
+      var result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsY);
       if (!result) {
         return false;
       }
@@ -1109,6 +1076,39 @@ public class Macroclass {
           return false;
         }
         positionY2WCS = outputsY[ProbeOutputNum.YPosition];
+
+        // move back to original position
+        if (!macro.ExecuteGCode(
+          "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS)
+        )) {
+          return false;
+        }
+      }
+
+      Dictionary<ProbeOutputNum, double> outputsX;
+      subroutineInputs.Remove('Y');
+      subroutineInputs.Add('X', positionXNominal);
+      result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
+      if (!result) {
+        return false;
+      }
+      var positionX1WCS = outputsX[ProbeOutputNum.XPosition];
+      var positionX2WCS = positionX1WCS;
+
+      if (incrementY != null) {
+        // move to secondary probe position
+        if (!macro.ExecuteGCode(
+          "G90 F" + macro.FormatD(settings.TravelFeedRate) + " G1 X" + macro.FormatD(positionXOriginalWCS) + " Y" + macro.FormatD(positionYOriginalWCS),
+          "G91 F" + macro.FormatD(settings.TravelFeedRate) + " G1 Y" + macro.FormatD(incrementY)
+        )) {
+          return false;
+        }
+
+        result = subroutine.InternalExecute(macro, settings, subroutineInputs, out outputsX);
+        if (!result) {
+          return false;
+        }
+        positionX2WCS = outputsX[ProbeOutputNum.XPosition];
 
         // move back to original position
         if (!macro.ExecuteGCode(
@@ -1167,10 +1167,6 @@ public class Macroclass {
       angleXDimension = macro.RadiansToDegrees(angleXDimension);
       angleYDimension = macro.RadiansToDegrees(angleYDimension);
       angleDimension = Math.Abs(macro.RadiansToDegrees(angleDimension));
-
-      // angleXDimension = Math.Abs(angleXDimension) > 90D ? angleXDimension - 90 : angleXDimension;
-      // angleXDimension = angleXDimension > 90D ? angleXDimension - 90D : angleXDimension < -90D ? angleXDimension + 90D : angleXDimension;
-      // angleYDimension = angleYDimension > 90D ? angleYDimension - 90D : angleYDimension < -90D ? angleYDimension + 90D : angleYDimension;
 
       var angleXError = angleXDimension > 0 ? angleXDimension - 90D : angleXDimension + 90D;
       var angleYError = angleYDimension;
