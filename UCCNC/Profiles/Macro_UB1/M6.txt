@@ -59,9 +59,9 @@ var toolOffsetProbeAfterToolChange = false;
 double zSafe = 0.0D;
 
 // Z position to release tool
-double toolChangeReleaseZ = -5.0250D;
+double toolChangeReleaseZ = -6.02D;
 // Z position to clamp tool
-double toolChangeClampZ = toolChangeReleaseZ;
+double toolChangeClampZ = toolChangeReleaseZ - 0.05;
 
 // feedrate when moving to or out of tool release/clamp position
 int toolChangeFeedRate = 20;
@@ -86,21 +86,21 @@ var toolSlots = new Position[]{
     // Slot 0 does not exist
     new Position(double.NaN, double.NaN),
     // Slot 1
-    new Position(-18.0066D, -0.1277D),
+    new Position(-18.0015D, -0.1683D),
     // Slot 2
-    new Position(-15.8446D, -0.1306D),
+    new Position(-15.8436D, -0.1732D),
     // Slot 3
-    new Position(-13.6887D, -0.1300D),
+    new Position(-13.6899D, -0.1621D),
     // Slot 4
-    new Position(-11.5288D, -0.1379D),
+    new Position(-11.5367D, -0.1700D),
     // Slot 5
-    new Position(-9.3756D, -0.1328D),
+    new Position(-9.3689D, -0.1700D),
     // Slot 6
-    new Position(-7.2092D, -0.1208D),
+    new Position(-7.2179D, -0.1500D),
     // Slot 7
-    new Position(-5.0576D, -0.1175D),
+    new Position(-5.0614, -0.1500D),
     // Slot 8
-    new Position(-2.9006D, -0.1346D),
+    new Position(-2.9068D, -0.1600D),
 };
 
 // manual tool change position
