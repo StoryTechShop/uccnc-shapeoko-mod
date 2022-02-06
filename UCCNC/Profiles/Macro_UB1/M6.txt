@@ -107,7 +107,8 @@ var toolSlots = new Position[]{
 var toolManualPosition = new Position(-9.0D, -18.0D);
 // enable prompts to engage tool release and clamp
 var toolManualATCPrompts = false;
-
+// prompt before moving to toolManualPosition
+var toolManualPromptBeforeMove = false;
 // enable prompt for tool offset probe after manaul tool change
 var toolManualToolOffsetProbePrompt = true;
 
@@ -212,7 +213,11 @@ QTCDelegate ExecuteManualToolChange = (string status, ToolChangeAction action, i
     var distanceY = Math.Abs(exec.GetYmachpos() - toolManualPosition.Y);
     // check if not at manual tool position
     if(distanceX > 0.0001D || distanceY > 0.0001D){
-        result = Prompt("M6: Manual Tool Change", "Move to position for manual " + action.ToString().ToLower() + " of T" + toolNumber + "?\n" + toolDesc, "YesNoCancel", PromptStatus.Warning);
+        
+        result = toolManualPromptBeforeMove ? 
+                    Prompt("M6: Manual Tool Change", "Move to position for manual " + action.ToString().ToLower() + " of T" + toolNumber + "?\n" + toolDesc, "YesNoCancel", PromptStatus.Warning) :
+                    DialogResult.Yes;
+                    
         if(result == DialogResult.Yes){
             if(!ExecuteGCode("G00 G53 X" + toolManualPosition.X + " Y" + toolManualPosition.Y)){
                 exec.AddStatusmessage("M6: tool change interrupted");
