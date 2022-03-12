@@ -3,7 +3,7 @@
  * Shield: Rigged Circuits 24V Industrial I/O - https://www.rugged-circuits.com/24v-industrial/24v-industrial-shield / https://www.rugged-circuits.com/24v-industrial-tech-page
  * Roles:
  * - ATC PNP sensor conditioning to UC300ETH-5LPT/UCCNC
- *     The ATC NPN sensor is outputing at a lower voltage (Vout: ~5V) than supplied (Vcc: 24V).
+ *     The ATC PNP sensor is outputing at a lower voltage (Vout: ~5V) than supplied (Vcc: 24V).
  *     This causes UC300ETH/UB1 to not detect the state change on the input pins selected (requires 24V source).
  *
  * - E-STOP state output to LED
