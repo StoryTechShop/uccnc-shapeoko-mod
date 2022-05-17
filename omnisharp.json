@@ -1,0 +1,26 @@
+{
+   "script": {
+      "enabled": true,
+      "defaultTargetFramework": "net403",
+      "enableScriptNuGetReferences": false,
+      "rspFilePath": "./macro-csx.rsp"
+   },
+   "FormattingOptions": {
+      "IndentationSize": 2,
+      "NewLinesForBracesInTypes": false,
+      "NewLinesForBracesInMethods": false,
+      "NewLinesForBracesInProperties": false,
+      "NewLinesForBracesInAccessors": false,
+      "NewLinesForBracesInAnonymousMethods": false,
+      "NewLinesForBracesInControlBlocks": false,
+      "NewLinesForBracesInAnonymousTypes": false,
+      "NewLinesForBracesInObjectCollectionArrayInitializers": false,
+      "NewLinesForBracesInLambdaExpressionBody": false,
+      "NewLineForCatch": false,
+      "NewLineForClausesInQuery": false,
+      "NewLineForElse": false,
+      "NewLineForFinally": false,
+      "NewLineForMembersInAnonymousTypes": false,
+      "NewLineForMembersInObjectInit": false
+   }
+}

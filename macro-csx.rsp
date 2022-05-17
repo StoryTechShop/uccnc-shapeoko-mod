@@ -1,0 +1,3 @@
+/r:"C:/UCCNC/UCCNC.exe"
+/r:"System.Windows.Forms.dll"
+/u:System;System.Collections.Generic;System.Threading;System.Windows.Forms;UCCNC
