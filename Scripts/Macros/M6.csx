@@ -65,6 +65,11 @@ public class Macroclass {
     // should ALWAYS run tool offset probe macro after a successful tool change
     var toolOffsetProbeAfterToolChange = false;
 
+    // macros executed before unloading current tool and after new tool loaded
+    // can be used to retract/remove dust boot and detract/reinstall
+    var toolChangePreMacro = "";
+    var toolChangePostMacro = "";
+
     // safe Z position for travel
     double zSafe = 0.0D;
 
@@ -175,6 +180,8 @@ public class Macroclass {
     }
 
     if (!ExecuteGCode(
+        // execute any pre-macro
+        toolChangePreMacro,
         // stop coolant and spindle
         "M9", "M5",
         // move to safe z
@@ -476,6 +483,8 @@ public class Macroclass {
       var toolSlotOffsetPosition = new Position(toolSlotPosition.X + toolChangeSlotOffset.X, toolSlotPosition.Y + toolChangeSlotOffset.Y);
 
       if (!ExecuteGCode(
+          // execute any post-macro
+          toolChangePostMacro,
           // move to safe z
           "G00 G53 Z" + zSafe,
           // move to tool slot offset position

@@ -21,6 +21,14 @@ public class Macroclass {
     // should apply G43 tool offset after successful tool probe offset
     var applyToolOffset = true;
 
+    // macros executed before probing tool and after successful probe
+    // can be used to retract/remove dust boot and detract/reinstall
+    var toolProbePreMacro = "";
+    var toolProbePostMacro = "";
+
+    // should prompt before and after for (passive) probe setup, i.e. attach probe lead to tool
+    var promptProbeSetup = false;
+
     // INPUT to detect if a tool is clamped (96=InputPT3PN11)
     var atcLEDToolClamp = 96;
     // INPUT to detect tool release (97=InputPT3PN12)
@@ -94,21 +102,21 @@ public class Macroclass {
     // check if machine is homed/referenced
     if (!exec.GetLED(56) || !exec.GetLED(57) || !exec.GetLED(58)) {
       exec.Callbutton(buttonInterrupt);
-      Prompt("M31: Tool Offset Probe", "Machine is not homed", "OK", true);
+      Prompt("M31: Tool Offset Probe", "Machine is not homed", "OK", PromptStatus.Error);
       return;
     }
 
     // check if fixed probed location is set
     if (!exec.GetLED(307)) {
       exec.Callbutton(buttonInterrupt);
-      Prompt("M31: Tool Offset Probe", "Fixed probe location not saved", "OK", true);
+      Prompt("M31: Tool Offset Probe", "Fixed probe location not saved", "OK", PromptStatus.Error);
       return;
     }
 
     // check that there is a tool in spindle
     if (toolCurrentNumber < 1 || !AssertClampPosition(atcLEDToolClamp, true, atcLEDToolRelease, false)) {
       exec.Callbutton(buttonInterrupt);
-      Prompt("M31: Tool Offset Probe", "Tool not in spindle", "OK", true);
+      Prompt("M31: Tool Offset Probe", "Tool not in spindle", "OK", PromptStatus.Error);
       return;
     }
 
@@ -123,7 +131,7 @@ public class Macroclass {
     }
     if (toolMasterNumber < 1) {
       exec.Callbutton(buttonInterrupt);
-      Prompt("M31: Tool Offset Probe", "No master tool reference found", "OK", true);
+      Prompt("M31: Tool Offset Probe", "No master tool reference found", "OK", PromptStatus.Error);
       return;
     }
 
@@ -135,7 +143,7 @@ public class Macroclass {
     if (double.NaN.Equals(toolMasterProbeZ)) {
       if (offsetNumber != toolMasterNumber) {
         exec.Callbutton(buttonInterrupt);
-        Prompt("M31: Tool Offset Probe", "T" + toolMasterNumber + " master tool reference not probed", "OK", true);
+        Prompt("M31: Tool Offset Probe", "T" + toolMasterNumber + " master tool reference not probed", "OK", PromptStatus.Error);
         return;
       }
       toolMasterProbeZ = 0.0D;
@@ -143,7 +151,7 @@ public class Macroclass {
 
     // if the tool offset is master, warn of updating master
     if (offsetNumber == toolMasterNumber) {
-      var result = Prompt("M31: Tool Offset Probe", "Probing T" + toolMasterNumber + " master tool reference may skew current known tool offsets\nContinue probing master tool reference?\n" + toolMasterDesc, "OKCancel", true);
+      var result = Prompt("M31: Tool Offset Probe", "Probing T" + toolMasterNumber + " master tool reference may skew current known tool offsets\nContinue probing master tool reference?\n" + toolMasterDesc, "OKCancel", PromptStatus.Warning);
 
       if (result != DialogResult.OK) {
         exec.AddStatusmessage("M31: Tool offset probe was canceled");
@@ -158,6 +166,8 @@ public class Macroclass {
     var originalModal = AS3.Getfield(877).Split('|');
 
     if (!ExecuteGCode(
+        // execute any pre-macro
+        toolProbePreMacro,
         // stop coolant and spindle
         "M9", "M5",
         // move to safe z
@@ -170,6 +180,14 @@ public class Macroclass {
     )) {
       exec.AddStatusmessage("M31: tool offset probe interrupted");
       return;
+    }
+
+    if (promptProbeSetup) {
+      var result = Prompt("M31: Tool Offset Probe", "Setup tool probe and press OK to continue", "OK", PromptStatus.Warning);
+      if (result != DialogResult.OK) {
+        exec.AddStatusmessage("M31: tool offset probe interrupted");
+        return;
+      }
     }
 
     // two stage probe, fast then fine feed rate
@@ -208,6 +226,14 @@ public class Macroclass {
       }
     }
 
+    if (promptProbeSetup) {
+      var result = Prompt("M31: Tool Offset Probe", "Remove tool probe and press OK to continue", "OK", PromptStatus.Warning);
+      if (result != DialogResult.OK) {
+        exec.AddStatusmessage("M31: tool offset probe interrupted");
+        return;
+      }
+    }
+
     if (!ExecuteGCode(
             // change to absolute mode
             "G90",
@@ -234,7 +260,7 @@ public class Macroclass {
           exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measured Z" + FormatD(offsetToolZ) + "; currently Z" + FormatD(offsetCurrentZ));
           exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measurement is out of tolerance: " + FormatD(offsetDifference) + ">" + FormatD(toolBreakageTolerance));
           exec.Callbutton(buttonInterrupt);
-          Prompt("M31: Tool Offset Probe", "Tool breakage detected for T" + toolCurrentNumber + " H" + offsetNumber, "OK", true);
+          Prompt("M31: Tool Offset Probe", "Tool breakage detected for T" + toolCurrentNumber + " H" + offsetNumber, "OK", PromptStatus.Error);
           return;
         } else {
           exec.AddStatusmessage("M31: Tool offset H" + offsetNumber + " measured Z" + FormatD(offsetToolZ) + "; currently Z" + FormatD(offsetCurrentZ));
@@ -271,6 +297,8 @@ public class Macroclass {
       }
 
       if (!ExecuteGCode(
+          // execute any post-macro
+          toolProbePostMacro,
           // move to safe z
           "G00 G53 Z" + zSafe,
           // apply tool offset if enabled
@@ -314,8 +342,12 @@ public class Macroclass {
     return num != null ? String.Format("{0:0.0###}", num.Value) : "<null>";
   }
 
-  private DialogResult Prompt(string title, string messsage, string button, bool warning = false) {
-    var result = exec.Informplugin("Messages.dll", string.Format("{0}{1}:{2}|{3}", warning ? "!" : "", button, title, messsage));
+  private DialogResult Prompt(string title, string messsage, string button, PromptStatus status = PromptStatus.None) {
+    var result = exec.Informplugin("Messages.dll",
+    string.Format("{0}{1}:{2}|{3}",
+        status == PromptStatus.Error ? "#" : status == PromptStatus.Warning ? "!" : "",
+        button, title, messsage
+    ));
     return result is DialogResult ? (DialogResult)result : DialogResult.None;
   }
 
@@ -337,6 +369,12 @@ public class Macroclass {
     } while (retry > 0 && debounce > 0 && !result);
 
     return result;
+  }
+
+  private enum PromptStatus {
+    Error = -1,
+    None = 0,
+    Warning = 1
   }
 
   private struct Position {
